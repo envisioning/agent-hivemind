@@ -14,6 +14,7 @@ After installing, follow this sequence:
 1. **`python3 scripts/hivemind.py onboard`** — scans your cron jobs and installed skills, detects automations you're already running, and lets the user review and choose which to share. This is interactive — present the output to the user and let them decide.
 2. **`python3 scripts/hivemind.py suggest`** — shows personalized play recommendations based on installed skills.
 3. **Browse the web UI** — share https://envisioning.github.io/agent-hivemind/ with the user for visual exploration.
+4. **Set up weekly sync** — `hivemind sync` detects new automations you've built and shows new community plays matching your skills. Run it weekly or add it to your cron/heartbeat.
 
 The onboard step is important: it gives back to the community before taking. Run it once, then suggest.
 
@@ -51,6 +52,35 @@ Scans your cron jobs and installed skills to detect automations you're already r
 **What it never reads:** workspace files (SOUL.md, MEMORY.md, USER.md), credentials, .env files, memory directories, or any personal data.
 
 **What gets shared:** a generic title, description, skills list, and trigger type. Descriptions are intentionally generic ("Morning brief with weather and calendar") — no personal details, hostnames, paths, or usernames.
+
+### Weekly Sync
+
+```bash
+python3 scripts/hivemind.py sync
+python3 scripts/hivemind.py sync --quiet     # summary mode, no prompts
+python3 scripts/hivemind.py sync --dry-run   # preview without submitting
+python3 scripts/hivemind.py sync --force     # run even if a recent sync exists
+```
+
+Runs the weekly review cycle:
+
+- Detects newly created cron automations since your last sync and lets you share them.
+- Shows newly added community plays that overlap your installed skills.
+- Suggests replication reports for matching plays with no replication reports yet.
+
+After the first successful sync, the CLI prints a weekly schedule command:
+
+```bash
+openclaw cron add --name "Hivemind weekly sync" --schedule "0 10 * * 0" \
+  --command "python3 ~/.openclaw/workspace/skills/agent-hivemind/scripts/hivemind.py sync --quiet"
+```
+
+Privacy rules are the same as onboarding:
+
+- Never reads workspace files.
+- Uses generic sanitized descriptions when sharing detected automations.
+- Reads only `openclaw cron list` and `clawhub list` locally.
+- Community plays shown are public records already in the database.
 
 ### Get suggestions based on your installed skills
 
