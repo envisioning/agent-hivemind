@@ -158,7 +158,7 @@
 
   async function fetchPlays() {
     var url = new URL('/rest/v1/plays', state.config.supabase_url);
-    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,created_at');
+    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,replication_count,created_at');
     url.searchParams.set('order', 'title');
 
     var response = await fetch(url.toString(), {
@@ -405,9 +405,10 @@
       renderBadge('effort', play.effort) +
       renderBadge('value', play.value) +
       '</div>' +
+      (play.replication_count > 0 ? '<p class="detail-text replication-count">' + play.replication_count + ' replication' + (play.replication_count !== 1 ? 's' : '') + '</p>' : '') +
       '<p><a href="' +
       escapeAttribute(playSourceUrl(play)) +
-      '" target="_blank" rel="noopener noreferrer">Open source record</a></p>';
+      '" target="_blank" rel="noopener noreferrer">View source →</a></p>';
 
     els.commentsList.innerHTML = '<p class="detail-text">Loading comments...</p>';
     els.commentsEmpty.classList.add('hidden');
@@ -746,7 +747,11 @@
   }
 
   function playSourceUrl(play) {
-    return state.config.supabase_url + '/rest/v1/plays?id=eq.' + encodeURIComponent(play.id) + '&select=*';
+    // Use the play's original source URL if available, otherwise the API endpoint with key
+    if (play.source && play.source.startsWith('http')) {
+      return play.source;
+    }
+    return state.config.supabase_url + '/rest/v1/plays?id=eq.' + encodeURIComponent(play.id) + '&select=*&apikey=' + encodeURIComponent(state.config.supabase_anon_key);
   }
 
   function shortHash(value) {
