@@ -316,6 +316,13 @@ select:focus {
   color: var(--muted-foreground);
   font-size: 12px;
 }
+.count-highlight {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
 
 .plays-grid {
   margin-top: 10px;

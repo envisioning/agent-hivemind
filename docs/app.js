@@ -353,7 +353,8 @@
 
     sortPlays(filtered, state.sort);
 
-    els.countLabel.textContent = 'Showing ' + filtered.length + ' of ' + state.plays.length + ' plays';
+    var isFiltered = filtered.length !== state.plays.length;
+    els.countLabel.innerHTML = 'Showing ' + (isFiltered ? '<span class="count-highlight">' + filtered.length + '</span>' : filtered.length) + ' of ' + state.plays.length + ' plays';
     els.browseEmpty.classList.toggle('hidden', filtered.length > 0);
 
     els.playsGrid.innerHTML = filtered
