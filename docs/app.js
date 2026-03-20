@@ -727,6 +727,8 @@
       effort: normalizeLevel(row.effort),
       value: normalizeLevel(row.value),
       gotcha: row.gotcha || '',
+      source: row.source || '',
+      replication_count: row.replication_count || 0,
       created_at: row.created_at || ''
     };
   }
