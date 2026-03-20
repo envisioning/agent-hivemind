@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Agent Hivemind CLI — contribute, search, suggest, and replicate plays."""
+"""Agent Hivemind CLI — contribute, search, suggest, replicate plays, and comment."""
 
 import argparse
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 from urllib.request import Request, urlopen
@@ -15,6 +16,7 @@ from urllib.error import HTTPError
 SUPABASE_URL = os.environ.get("HIVEMIND_URL", "https://tjcryyjrjxbcjzybzdow.supabase.co")
 SUPABASE_ANON_KEY = os.environ.get("HIVEMIND_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqY3J5eWpyanhiY2p6eWJ6ZG93Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NTIzNjUsImV4cCI6MjA4OTUyODM2NX0.G_PtxkbqXO6jz1mGUX7-afO1WlHl1c_z0_QBNbqLeJU")
 FUNCTION_URL = f"{SUPABASE_URL}/functions/v1/submit-play"
+KEY_PATH = os.path.expanduser("~/.openclaw/hivemind-key.pem")
 
 
 def get_agent_hash():

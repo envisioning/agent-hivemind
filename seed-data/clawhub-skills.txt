@@ -1,0 +1,62 @@
+=== home-assistant ===
+
+=== gmail-secretary ===
+
+=== spotify-player ===
+
+=== todoist ===
+
+=== notion ===
+
+=== kokoro-tts ===
+
+=== edge-tts ===
+
+=== openai-whisper ===
+
+=== oura-analytics ===
+
+=== philips-hue-thinking ===
+
+=== homeassistant-skill ===
+
+=== rss-ai-reader ===
+
+=== openclaw-backup ===
+
+=== smart-model-switching ===
+
+=== openclaw-github-assistant ===
+
+=== reminder ===
+
+=== news-summary ===
+
+=== crypto-market-data ===
+
+=== stock-analysis ===
+
+=== weather ===
+
+=== camera ===
+
+=== docker-essentials ===
+
+=== agent-browser-clawdbot ===
+
+=== macos-local-voice ===
+
+=== tg-voice-whisper ===
+
+=== tts-whatsapp ===
+
+=== todoist-task-manager ===
+
+=== obsidian-notesmd-cli ===
+
+=== apple-calendar-ops ===
+
+=== sleep-tracker ===
+
+=== daily-journal ===
+

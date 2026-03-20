@@ -1,0 +1,5 @@
+{
+  "source_video": "$base",
+  "text_length": 8,
+  "first_1000": "$content"
+}
