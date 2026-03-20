@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Agent Hivemind — Skill Co-occurrence Graph</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+svg { width: 100vw; height: 100vh; }
+.tooltip { position: absolute; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 8px 12px; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity 0.15s; max-width: 300px; z-index: 10; }
+.tooltip .skill-name { font-weight: 600; color: #D6F249; font-size: 15px; }
+.tooltip .skill-count { color: #888; margin-top: 2px; }
+.header { position: absolute; top: 16px; left: 20px; z-index: 5; }
+.header h1 { font-size: 18px; font-weight: 600; color: #D6F249; }
+.header p { font-size: 12px; color: #666; margin-top: 4px; }
+.legend { position: absolute; bottom: 16px; left: 20px; font-size: 11px; color: #555; z-index: 5; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🐝 Agent Hivemind — Skill Graph</h1>
+  <p>223 plays · 60 skills · edges = co-occurrence in plays (thicker = more shared plays)</p>
+</div>
+<div class="legend">Drag nodes · Scroll to zoom · Hover for details</div>
+<div class="tooltip" id="tooltip"></div>
+<svg id="graph"></svg>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+const data = {"nodes":[{"id":"telegram","count":41},{"id":"message","count":36},{"id":"gmail","count":31},{"id":"web_fetch","count":30},{"id":"web_search","count":26},{"id":"browser","count":25},{"id":"coding-agent","count":15},{"id":"todoist","count":14},{"id":"crm","count":12},{"id":"calendar","count":9},{"id":"memory_search","count":9},{"id":"exec","count":9},{"id":"github","count":9},{"id":"browser-automation","count":8},{"id":"openai-whisper","count":5},{"id":"weather","count":4},{"id":"notion","count":4},{"id":"voice-wake-say","count":4},{"id":"home-assistant","count":4},{"id":"gsc","count":4},{"id":"docker-essentials","count":3},{"id":"slack","count":3},{"id":"oura","count":3},{"id":"kokoro-tts","count":3},{"id":"pdf","count":3},{"id":"whatsapp-styling-guide","count":3},{"id":"git-essentials","count":3},{"id":"rss-ai-reader","count":2},{"id":"webhook","count":2},{"id":"obsidian-notesmd-cli","count":2},{"id":"edge-tts","count":2},{"id":"security-auditor","count":2},{"id":"plausible","count":2},{"id":"things-mac","count":2},{"id":"humanizer","count":2},{"id":"discord","count":1},{"id":"granola-mcp","count":1},{"id":"spotify-player","count":1},{"id":"philips-hue-thinking","count":1},{"id":"openhue","count":1},{"id":"openclaw-backup","count":1},{"id":"screenshot","count":1},{"id":"crypto-market-data","count":1},{"id":"stock-analysis","count":1},{"id":"smart-model-switching","count":1},{"id":"openclaw-github-assistant","count":1},{"id":"apple-calendar-ops","count":1},{"id":"tg-voice-whisper","count":1},{"id":"oura-analytics","count":1},{"id":"gmail-secretary","count":1},{"id":"sleep-tracker","count":1},{"id":"daily-journal","count":1},{"id":"reminder","count":1},{"id":"news-summary","count":1},{"id":"agent-browser-clawdbot","count":1},{"id":"macos-local-voice","count":1},{"id":"tts-whatsapp","count":1},{"id":"gcalcli-calendar","count":1},{"id":"translate","count":1},{"id":"pdf-extract","count":1}],"links":[{"source":"browser","target":"web_fetch","weight":14},{"source":"message","target":"web_fetch","weight":14},{"source":"browser","target":"web_search","weight":11},{"source":"crm","target":"gmail","weight":8},{"source":"telegram","target":"web_search","weight":7},{"source":"calendar","target":"gmail","weight":6},{"source":"gmail","target":"telegram","weight":6},{"source":"browser","target":"message","weight":6},{"source":"exec","target":"telegram","weight":4},{"source":"calendar","target":"telegram","weight":4},{"source":"gmail","target":"todoist","weight":4},{"source":"telegram","target":"todoist","weight":4},{"source":"memory_search","target":"telegram","weight":4},{"source":"browser-automation","target":"telegram","weight":4},{"source":"gmail","target":"web_search","weight":3},{"source":"calendar","target":"crm","weight":3},{"source":"coding-agent","target":"telegram","weight":3},{"source":"telegram","target":"voice-wake-say","weight":3},{"source":"coding-agent","target":"web_search","weight":3},{"source":"coding-agent","target":"github","weight":3},{"source":"browser","target":"telegram","weight":3},{"source":"telegram","target":"web_fetch","weight":3},{"source":"github","target":"telegram","weight":3},{"source":"calendar","target":"weather","weight":2},{"source":"todoist","target":"weather","weight":2},{"source":"todoist","target":"web_search","weight":2},{"source":"browser","target":"gmail","weight":2},{"source":"coding-agent","target":"todoist","weight":2},{"source":"notion","target":"web_search","weight":2},{"source":"gmail","target":"slack","weight":2},{"source":"gmail","target":"weather","weight":2},{"source":"memory_search","target":"web_fetch","weight":2},{"source":"browser","target":"coding-agent","weight":2},{"source":"kokoro-tts","target":"openai-whisper","weight":2},{"source":"gsc","target":"plausible","weight":2},{"source":"gmail","target":"web_fetch","weight":2},{"source":"browser-automation","target":"crm","weight":2},{"source":"memory_search","target":"todoist","weight":2},{"source":"crm","target":"telegram","weight":2},{"source":"exec","target":"github","weight":2},{"source":"gmail","target":"message","weight":2}]};
+
+const w = window.innerWidth, h = window.innerHeight;
+const svg = d3.select("#graph").attr("viewBox", [0, 0, w, h]);
+const tooltip = d3.select("#tooltip");
+
+// Color scale based on count
+const maxCount = d3.max(data.nodes, d => d.count);
+const color = d3.scaleSequential(d3.interpolateViridis).domain([0, Math.log(maxCount + 1)]);
+const accent = "#D6F249";
+
+// Size scale
+const r = d3.scaleSqrt().domain([1, maxCount]).range([4, 28]);
+
+// Link width
+const maxWeight = d3.max(data.links, d => d.weight);
+const linkWidth = d3.scaleLinear().domain([1, maxWeight]).range([0.5, 4]);
+
+const g = svg.append("g");
+
+// Zoom
+svg.call(d3.zoom().scaleExtent([0.3, 5]).on("zoom", e => g.attr("transform", e.transform)));
+
+const sim = d3.forceSimulation(data.nodes)
+  .force("link", d3.forceLink(data.links).id(d => d.id).distance(d => 120 - d.weight * 4))
+  .force("charge", d3.forceManyBody().strength(d => -80 - d.count * 3))
+  .force("center", d3.forceCenter(w / 2, h / 2))
+  .force("collision", d3.forceCollide().radius(d => r(d.count) + 4));
+
+const link = g.append("g")
+  .selectAll("line")
+  .data(data.links)
+  .join("line")
+  .attr("stroke", "#333")
+  .attr("stroke-opacity", 0.4)
+  .attr("stroke-width", d => linkWidth(d.weight));
+
+const node = g.append("g")
+  .selectAll("g")
+  .data(data.nodes)
+  .join("g")
+  .call(d3.drag()
+    .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+    .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+  );
+
+node.append("circle")
+  .attr("r", d => r(d.count))
+  .attr("fill", d => d.count >= 10 ? accent : color(Math.log(d.count + 1)))
+  .attr("stroke", d => d.count >= 10 ? accent : "#555")
+  .attr("stroke-width", d => d.count >= 10 ? 2 : 1)
+  .attr("opacity", 0.85);
+
+// Labels for nodes with count >= 3
+node.filter(d => d.count >= 3).append("text")
+  .text(d => d.id)
+  .attr("font-size", d => Math.max(9, Math.min(14, 6 + d.count * 0.4)))
+  .attr("fill", "#ccc")
+  .attr("text-anchor", "middle")
+  .attr("dy", d => r(d.count) + 12)
+  .style("pointer-events", "none");
+
+// Hover
+node.on("mouseover", (e, d) => {
+  const connected = new Set();
+  data.links.forEach(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    if (s === d.id) connected.add(t);
+    if (t === d.id) connected.add(s);
+  });
+
+  node.select("circle").attr("opacity", n => n.id === d.id || connected.has(n.id) ? 1 : 0.15);
+  node.selectAll("text").attr("opacity", n => n.id === d.id || connected.has(n.id) ? 1 : 0.15);
+  link.attr("stroke-opacity", l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    return s === d.id || t === d.id ? 0.8 : 0.05;
+  }).attr("stroke", l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    return s === d.id || t === d.id ? accent : "#333";
+  });
+
+  const connList = [...connected].slice(0, 8).join(", ");
+  tooltip.html(`<div class="skill-name">${d.id}</div><div class="skill-count">${d.count} plays · connected to: ${connList}</div>`)
+    .style("left", (e.pageX + 12) + "px").style("top", (e.pageY - 10) + "px").style("opacity", 1);
+})
+.on("mousemove", e => { tooltip.style("left", (e.pageX + 12) + "px").style("top", (e.pageY - 10) + "px"); })
+.on("mouseout", () => {
+  node.select("circle").attr("opacity", 0.85);
+  node.selectAll("text").attr("opacity", 1);
+  link.attr("stroke-opacity", 0.4).attr("stroke", "#333");
+  tooltip.style("opacity", 0);
+});
+
+sim.on("tick", () => {
+  link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+  node.attr("transform", d => `translate(${d.x},${d.y})`);
+});
+</script>
+</body>
+</html>
