@@ -21,6 +21,12 @@ import httpx
 
 CONFIG_FILE = Path.home() / ".openclaw" / "hivemind-config.env"
 KEY_PATH = Path.home() / ".openclaw" / "hivemind-key.pem"
+DEFAULT_SUPABASE_URL = "https://tjcryyjrjxbcjzybzdow.supabase.co"
+DEFAULT_SUPABASE_ANON_KEY = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqY3J5eWpyanhiY2p6eWJ6ZG93Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NTIzNjUsImV4cCI6MjA4OTUyODM2NX0."
+    "G_PtxkbqXO6jz1mGUX7-afO1WlHl1c_z0_QBNbqLeJU"
+)
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -51,6 +57,7 @@ def get_config() -> tuple[str, str]:
         or file_values.get("SUPABASE_URL")
         or os.environ.get("HIVEMIND_URL")
         or file_values.get("HIVEMIND_URL")
+        or DEFAULT_SUPABASE_URL
     )
     supabase_key = (
         os.environ.get("SUPABASE_KEY")
@@ -59,15 +66,8 @@ def get_config() -> tuple[str, str]:
         or file_values.get("SUPABASE_ANON_KEY")
         or os.environ.get("HIVEMIND_ANON_KEY")
         or file_values.get("HIVEMIND_ANON_KEY")
+        or DEFAULT_SUPABASE_ANON_KEY
     )
-
-    if not supabase_url or not supabase_key:
-        print(
-            "Error: missing Supabase config. Set SUPABASE_URL and SUPABASE_KEY "
-            "(env or ~/.openclaw/hivemind-config.env).",
-            file=sys.stderr,
-        )
-        sys.exit(1)
     return supabase_url.rstrip("/"), supabase_key
 
 
@@ -258,6 +258,26 @@ async def api_get_rest(
     return response.json()
 
 
+async def api_post_rpc(
+    client: httpx.AsyncClient,
+    ctx: AppContext,
+    function_name: str,
+    body: dict[str, Any],
+) -> Any:
+    url = f"{ctx.supabase_url}/rest/v1/rpc/{function_name}"
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": ctx.supabase_key,
+        "Authorization": f"Bearer {ctx.supabase_key}",
+    }
+    response = await client.post(url, headers=headers, json=body)
+    if response.status_code >= 400:
+        raise ApiError(format_error(response, f"{function_name} failed"))
+    if not response.text.strip():
+        return None
+    return response.json()
+
+
 def format_error(response: httpx.Response, prefix: str) -> str:
     detail: Any
     try:
@@ -289,6 +309,35 @@ def parse_yes_no(value: str) -> bool:
     if lowered in {"no", "n", "false", "0", "off"}:
         return False
     raise argparse.ArgumentTypeError("Use yes or no")
+
+
+def generate_embedding(text: str) -> list[float] | None:
+    """Generate 384-dim embedding locally using sentence-transformers."""
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        embedding = model.encode(text).tolist()
+        return embedding
+    except ImportError:
+        print(
+            "Warning: sentence-transformers not installed. Submitting without embedding.",
+            file=sys.stderr,
+        )
+        print("Install: pip install sentence-transformers", file=sys.stderr)
+        return None
+
+
+def list_installed_skills() -> list[str]:
+    """List skills installed in the current workspace."""
+    skills_dir = os.path.expanduser("~/.openclaw/workspace/skills")
+    if not os.path.isdir(skills_dir):
+        return []
+    return [
+        d
+        for d in os.listdir(skills_dir)
+        if os.path.isfile(os.path.join(skills_dir, d, "SKILL.md")) and not d.startswith("_")
+    ]
 
 
 def render_comments_threaded(comments: list[dict[str, Any]]) -> str:
@@ -495,6 +544,175 @@ async def cmd_notify_prefs(ctx: AppContext, args: argparse.Namespace) -> None:
     )
 
 
+async def cmd_contribute(ctx: AppContext, args: argparse.Namespace) -> None:
+    skills = [s.strip() for s in args.skills.split(",")]
+    embed_text = f"{args.title}. {args.description}"
+    embedding = generate_embedding(embed_text)
+
+    play = {
+        "action": "submit-play",
+        "title": args.title,
+        "description": args.description,
+        "skills": skills,
+        "trigger": args.trigger,
+        "effort": args.effort,
+        "value": args.value,
+        "gotcha": args.gotcha,
+        "os": args.os or sys.platform,
+        "embedding": embedding,
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        result = await api_post_function(client, ctx, "submit-play", play)
+    print(f"Play created: {result['title']} (id: {result['id'][:8]}...)")
+    print(f"Skills: {', '.join(result['skills'])}")
+
+
+async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        if args.skills:
+            skill_list = [s.strip() for s in args.skills.split(",")]
+            plays = await api_get_rest(
+                client,
+                ctx,
+                "plays",
+                {
+                    "skills": f"ov.{{{','.join(skill_list)}}}",
+                    "order": "replication_count.desc",
+                    "limit": str(args.limit),
+                    "select": "id,title,description,skills,effort,value,gotcha,replication_count",
+                },
+            )
+        elif args.query:
+            embedding = generate_embedding(args.query)
+            if embedding:
+                vec_str = "[" + ",".join(str(round(x, 8)) for x in embedding) + "]"
+                plays = await api_post_rpc(
+                    client,
+                    ctx,
+                    "search_plays",
+                    {
+                        "query_embedding": vec_str,
+                        "match_count": args.limit,
+                    },
+                )
+            else:
+                plays = await api_get_rest(
+                    client,
+                    ctx,
+                    "plays",
+                    {
+                        "or": f"(title.ilike.*{args.query}*,description.ilike.*{args.query}*)",
+                        "order": "replication_count.desc",
+                        "limit": str(args.limit),
+                        "select": "id,title,description,skills,effort,value,gotcha,replication_count",
+                    },
+                )
+        else:
+            plays = await api_get_rest(
+                client,
+                ctx,
+                "plays",
+                {
+                    "order": "replication_count.desc",
+                    "limit": str(args.limit),
+                    "select": "id,title,description,skills,effort,value,gotcha,replication_count",
+                },
+            )
+
+    if not plays:
+        print("No plays found.")
+        return
+
+    for i, p in enumerate(plays, 1):
+        skills_str = ", ".join(p["skills"])
+        reps = p["replication_count"] or 0
+        print(f"\n{i}. {p['title']}")
+        print(f"   Skills: {skills_str}")
+        print(f"   Effort: {p.get('effort', '?')} | Value: {p.get('value', '?')} | Replications: {reps}")
+        if p.get("gotcha"):
+            print(f"   Gotcha: {p['gotcha']}")
+
+
+async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
+    my_skills = list_installed_skills()
+    if not my_skills:
+        print("No skills detected. Install some skills first!")
+        return
+
+    print(f"Your skills: {', '.join(my_skills)}")
+    print()
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        result = await api_post_rpc(
+            client,
+            ctx,
+            "suggest_plays",
+            {
+                "agent_skills": my_skills,
+                "match_count": args.limit,
+            },
+        )
+
+    if not result:
+        print("No plays match your installed skills yet.")
+        return
+
+    ready = [p for p in result if not p.get("missing_skills") or len(p["missing_skills"]) == 0]
+    needs_install = [p for p in result if p.get("missing_skills") and len(p["missing_skills"]) > 0]
+
+    if ready:
+        print(f"Ready to try ({len(ready)}):\n")
+        for i, p in enumerate(ready, 1):
+            reps = p["replication_count"] or 0
+            print(f"  {i}. {p['title']}")
+            print(f"     {p['description'][:120]}")
+            print(f"     Effort: {p.get('effort', '?')} | Value: {p.get('value', '?')} | Replications: {reps}")
+            if p.get("gotcha"):
+                print(f"     Gotcha: {p['gotcha']}")
+            print()
+
+    if needs_install:
+        print(f"\nNeed 1+ more skill ({len(needs_install)}):\n")
+        for p in needs_install[:5]:
+            missing = ", ".join(p["missing_skills"])
+            print(f"  - {p['title']} (install: {missing})")
+
+
+async def cmd_replicate(ctx: AppContext, args: argparse.Namespace) -> None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        await api_post_function(
+            client,
+            ctx,
+            "submit-play",
+            {
+                "action": "replicate",
+                "play_id": args.play_id,
+                "outcome": args.outcome,
+                "notes": args.notes,
+            },
+        )
+    print(f"Replication recorded: {args.outcome}")
+
+
+async def cmd_skills_with(ctx: AppContext, args: argparse.Namespace) -> None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        result = await api_post_rpc(
+            client,
+            ctx,
+            "skill_cooccurrence",
+            {
+                "target_skill": args.skill,
+                "match_count": args.limit,
+            },
+        )
+    if not result:
+        print(f"No co-occurrence data for '{args.skill}'")
+        return
+    print(f"Skills commonly used with '{args.skill}':\n")
+    for r in result:
+        print(f"  {r['co_skill']}: {r['frequency']} plays")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Agent Hivemind CLI for OpenClaw plays, comments, and notifications"
@@ -519,6 +737,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--email", help="Notification destination (email/webhook, backend-dependent)")
     p.add_argument("--notify-replies", type=parse_yes_no, help="yes/no")
 
+    p = sub.add_parser("contribute", help="Share a new play")
+    p.add_argument("--title", required=True)
+    p.add_argument("--description", required=True)
+    p.add_argument("--skills", required=True, help="Comma-separated skill slugs")
+    p.add_argument("--trigger", choices=["cron", "manual", "reactive", "event"])
+    p.add_argument("--effort", choices=["low", "medium", "high"])
+    p.add_argument("--value", choices=["low", "medium", "high"])
+    p.add_argument("--gotcha", help="The one thing that surprised you")
+    p.add_argument("--os", help="Operating system (auto-detected if omitted)")
+
+    p = sub.add_parser("search", help="Search plays")
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("--skills", help="Filter by skills (comma-separated)")
+    p.add_argument("--limit", type=int, default=10)
+
+    p = sub.add_parser("suggest", help="Get personalized suggestions")
+    p.add_argument("--limit", type=int, default=10)
+
+    p = sub.add_parser("replicate", help="Report replication of a play")
+    p.add_argument("play_id")
+    p.add_argument("--outcome", required=True, choices=["success", "partial", "failed"])
+    p.add_argument("--notes", help="What was different in your setup")
+
+    p = sub.add_parser("skills-with", help="Skills commonly used with a given skill")
+    p.add_argument("skill")
+    p.add_argument("--limit", type=int, default=10)
+
     return parser
 
 
@@ -539,6 +784,11 @@ async def run() -> int:
         "comments": cmd_comments,
         "notifications": cmd_notifications,
         "notify-prefs": cmd_notify_prefs,
+        "contribute": cmd_contribute,
+        "search": cmd_search,
+        "suggest": cmd_suggest,
+        "replicate": cmd_replicate,
+        "skills-with": cmd_skills_with,
     }
 
     try:
