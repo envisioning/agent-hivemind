@@ -158,7 +158,7 @@
 
   async function fetchPlays() {
     var url = new URL('/rest/v1/plays', state.config.supabase_url);
-    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,replication_count,created_at');
+    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,source,replication_count,created_at');
     url.searchParams.set('order', 'title');
 
     var response = await fetch(url.toString(), {
