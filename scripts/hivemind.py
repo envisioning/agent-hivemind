@@ -20,13 +20,9 @@ from urllib.parse import quote
 import httpx
 
 CONFIG_FILE = Path.home() / ".openclaw" / "hivemind-config.env"
+CONFIG_CACHE = Path.home() / ".openclaw" / "hivemind-config-cache.json"
 KEY_PATH = Path.home() / ".openclaw" / "hivemind-key.pem"
-DEFAULT_SUPABASE_URL = "https://tjcryyjrjxbcjzybzdow.supabase.co"
-DEFAULT_SUPABASE_ANON_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqY3J5eWpyanhiY2p6eWJ6ZG93Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NTIzNjUsImV4cCI6MjA4OTUyODM2NX0."
-    "G_PtxkbqXO6jz1mGUX7-afO1WlHl1c_z0_QBNbqLeJU"
-)
+CONFIG_ENDPOINT = "https://tjcryyjrjxbcjzybzdow.supabase.co/functions/v1/hivemind-config"
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -49,15 +45,48 @@ def load_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _fetch_remote_config() -> tuple[str, str] | None:
+    """Fetch config from remote endpoint, cache locally for 24h."""
+    import time
+
+    # Check cache first
+    if CONFIG_CACHE.exists():
+        try:
+            cache = json.loads(CONFIG_CACHE.read_text(encoding="utf-8"))
+            if time.time() - cache.get("fetched_at", 0) < 86400:  # 24h
+                return cache["supabase_url"], cache["supabase_anon_key"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Fetch from remote
+    try:
+        from urllib.request import Request, urlopen
+
+        req = Request(CONFIG_ENDPOINT, headers={"Accept": "application/json"})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            url = data["supabase_url"]
+            key = data["supabase_anon_key"]
+            # Cache it
+            CONFIG_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            CONFIG_CACHE.write_text(
+                json.dumps({"supabase_url": url, "supabase_anon_key": key, "fetched_at": time.time()}),
+                encoding="utf-8",
+            )
+            return url, key
+    except Exception:
+        return None
+
+
 def get_config() -> tuple[str, str]:
     file_values = load_env_file(CONFIG_FILE)
 
+    # Priority: env vars > config file > remote endpoint (cached)
     supabase_url = (
         os.environ.get("SUPABASE_URL")
         or file_values.get("SUPABASE_URL")
         or os.environ.get("HIVEMIND_URL")
         or file_values.get("HIVEMIND_URL")
-        or DEFAULT_SUPABASE_URL
     )
     supabase_key = (
         os.environ.get("SUPABASE_KEY")
@@ -66,8 +95,22 @@ def get_config() -> tuple[str, str]:
         or file_values.get("SUPABASE_ANON_KEY")
         or os.environ.get("HIVEMIND_ANON_KEY")
         or file_values.get("HIVEMIND_ANON_KEY")
-        or DEFAULT_SUPABASE_ANON_KEY
     )
+
+    # If either is missing, try remote config
+    if not supabase_url or not supabase_key:
+        remote = _fetch_remote_config()
+        if remote:
+            supabase_url = supabase_url or remote[0]
+            supabase_key = supabase_key or remote[1]
+
+    if not supabase_url or not supabase_key:
+        print(
+            "Error: missing Supabase config. Set SUPABASE_URL and SUPABASE_KEY "
+            "(env or ~/.openclaw/hivemind-config.env), or check your network connection.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     return supabase_url.rstrip("/"), supabase_key
 
 
