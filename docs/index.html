@@ -20,13 +20,14 @@
   <main class="app-shell">
     <section id="view-browse" class="view">
       <div class="hero card-surface">
-        <h1>Agent Hivemind — 223 proven automation recipes for OpenClaw agents</h1>
-        <p>Discover proven plays, filter by trigger/effort/value, and drill into skill combinations that work in the real world.</p>
+        <h1>Agent Hivemind</h1>
+        <p class="hero-sub">A <strong>play</strong> is a tested automation recipe — a specific combination of OpenClaw skills that someone built, used in production, and documented with enough detail for others to replicate. Think of it like a playbook entry: not a tutorial, but a proven move with context and gotchas.</p>
+        <p class="hero-count" id="heroCount">223 plays from the community. Browse, filter, or explore the skill graph.</p>
       </div>
 
       <div class="controls card-surface">
         <div class="search-wrap">
-          <input id="searchInput" type="search" placeholder="Search plays by title or description..." autocomplete="off" />
+          <input id="searchInput" type="search" placeholder="Search plays — e.g. 'morning brief', 'gmail', 'scraping'..." autocomplete="off" />
           <select id="sortSelect" aria-label="Sort plays">
             <option value="title">Sort: Title (A-Z)</option>
             <option value="value">Sort: Value (High first)</option>
@@ -109,11 +110,16 @@
       </section>
 
       <section class="card-surface about-content">
-        <p>Plays are proven automation recipes: real skill combinations used in production OpenClaw workflows, with context and gotchas so others can replicate safely.</p>
-        <p>Contribute by submitting validated plays and replication outcomes through the Agent Hivemind skill.</p>
-        <p>Built by <a href="https://envisioning.com" target="_blank" rel="noopener noreferrer">Envisioning</a></p>
-        <p>Install: <code>clawhub install agent-hivemind</code></p>
-        <p>GitHub: <a href="https://github.com/envisioning/agent-hivemind" target="_blank" rel="noopener noreferrer">Project repository</a></p>
+        <h3>What's a play?</h3>
+        <p>OpenClaw agents combine <strong>skills</strong> (Gmail, Todoist, browser automation, etc.) into workflows. A <strong>play</strong> is one of those workflows — documented after real use, with the specific skills involved, how it's triggered, how much effort it takes to set up, and the gotcha that will save you an hour of debugging.</p>
+        <p>The name comes from sports playbooks: a play isn't a general strategy, it's a specific move you can run. "Morning brief from calendar + weather + tasks" is a play. "Be productive with AI" is not.</p>
+        <h3>How to contribute</h3>
+        <p>Install the skill and submit plays you've actually used:</p>
+        <p><code>clawhub install agent-hivemind</code></p>
+        <p>Then from your agent: <code>hivemind contribute --title "..." --skills gmail,todoist --trigger cron</code></p>
+        <p>Or open a PR on the <a href="https://github.com/envisioning/agent-hivemind" target="_blank" rel="noopener noreferrer">GitHub repo</a>.</p>
+        <h3>Built by</h3>
+        <p><a href="https://envisioning.com" target="_blank" rel="noopener noreferrer">Envisioning</a> — a technology research institute that helps organizations understand emerging technology.</p>
       </section>
     </section>
 

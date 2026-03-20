@@ -119,11 +119,24 @@ a {
   margin: 0;
   font-size: clamp(1.4rem, 3.5vw, 2rem);
   line-height: 1.2;
+  color: var(--accent);
 }
 
-.hero p {
-  margin: 8px 0 0;
+.hero-sub {
+  margin: 12px 0 0;
   color: var(--text-2);
+  line-height: 1.6;
+  max-width: 700px;
+}
+
+.hero-sub strong {
+  color: var(--text);
+}
+
+.hero-count {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: 0.9rem;
 }
 
 .controls {
@@ -528,9 +541,17 @@ a:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.about-content h3 {
+  color: var(--accent);
+  margin: 20px 0 8px;
+  font-size: 1rem;
+}
+.about-content h3:first-child {
+  margin-top: 0;
+}
 .about-content p {
   color: var(--text-2);
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .about-content code {
