@@ -406,9 +406,7 @@
       renderBadge('value', play.value) +
       '</div>' +
       (play.replication_count > 0 ? '<p class="detail-text replication-count">' + play.replication_count + ' replication' + (play.replication_count !== 1 ? 's' : '') + '</p>' : '') +
-      '<p><a href="' +
-      escapeAttribute(playSourceUrl(play)) +
-      '" target="_blank" rel="noopener noreferrer">View source →</a></p>';
+      (playSourceUrl(play) ? '<p><a href="' + escapeAttribute(playSourceUrl(play)) + '" target="_blank" rel="noopener noreferrer">View source →</a></p>' : '');
 
     els.commentsList.innerHTML = '<p class="detail-text">Loading comments...</p>';
     els.commentsEmpty.classList.add('hidden');
@@ -533,9 +531,7 @@
       '">' +
       escapeHtml(play.title) +
       '</a></h3>' +
-      '<a class="source-link" href="' +
-      escapeAttribute(playSourceUrl(play)) +
-      '" target="_blank" rel="noopener noreferrer" aria-label="Source link">↗</a>' +
+      (playSourceUrl(play) ? '<a class="source-link" href="' + escapeAttribute(playSourceUrl(play)) + '" target="_blank" rel="noopener noreferrer" aria-label="Source link">↗</a>' : '') +
       '</div>' +
       '<p class="play-desc">' +
       escapeHtml(play.description || '') +
@@ -747,11 +743,10 @@
   }
 
   function playSourceUrl(play) {
-    // Use the play's original source URL if available, otherwise the API endpoint with key
     if (play.source && play.source.startsWith('http')) {
       return play.source;
     }
-    return state.config.supabase_url + '/rest/v1/plays?id=eq.' + encodeURIComponent(play.id) + '&select=*&apikey=' + encodeURIComponent(state.config.supabase_anon_key);
+    return null;
   }
 
   function shortHash(value) {
