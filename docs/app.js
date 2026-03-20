@@ -413,6 +413,12 @@
     els.commentsList.innerHTML = '<p class="detail-text">Loading comments...</p>';
     els.commentsEmpty.classList.add('hidden');
 
+    // Update the comment command with the actual play ID
+    var cmdEl = document.getElementById('commentCmd');
+    if (cmdEl) {
+      cmdEl.textContent = 'hivemind comment ' + play.id.substring(0, 8) + ' "your comment"';
+    }
+
     try {
       var comments = await fetchCommentsForPlay(play.id);
       renderCommentsThread(comments);
