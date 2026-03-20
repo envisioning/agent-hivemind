@@ -48,6 +48,12 @@ a {
   font-weight: 700;
   color: var(--text);
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-logo {
+  flex-shrink: 0;
 }
 
 .menu-toggle {
