@@ -5,6 +5,9 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
+// Built-in gte-small model — 384 dimensions, no external API needed
+const embeddingSession = new Supabase.ai.Session("gte-small");
+
 const RATE_LIMIT_PLAYS = 10;
 const RATE_LIMIT_REPLICATIONS = 20;
 
@@ -42,12 +45,20 @@ Deno.serve(async (req) => {
     if (!body.title || !body.description || !body.skills?.length) {
       return Response.json({ error: "Required: title, description, skills" }, { status: 400, headers: CORS });
     }
-    if (!body.embedding || !Array.isArray(body.embedding) || body.embedding.length !== 384) {
-      return Response.json({ error: "Required: embedding (384-dim float array)" }, { status: 400, headers: CORS });
-    }
 
     if (!(await checkRateLimit(agentHash, "plays", RATE_LIMIT_PLAYS))) {
       return Response.json({ error: "Rate limited: max 10 plays/day" }, { status: 429, headers: CORS });
+    }
+
+    // Generate embedding server-side using built-in gte-small (384 dims)
+    // Accept client embedding as fallback, but prefer server-generated
+    let embedding = body.embedding;
+    if (!embedding || !Array.isArray(embedding) || embedding.length !== 384) {
+      const embedText = `${body.title}. ${body.description}`;
+      embedding = (await embeddingSession.run(embedText, {
+        mean_pool: true,
+        normalize: true,
+      })) as number[];
     }
 
     const { data, error } = await supabase.from("plays").insert({
@@ -58,10 +69,11 @@ Deno.serve(async (req) => {
       effort: body.effort || null,
       value: body.value || null,
       gotcha: body.gotcha || null,
+      source: body.source || null,
       os: body.os || null,
       openclaw_version: body.openclaw_version || null,
       agent_hash: agentHash,
-      embedding: body.embedding,
+      embedding: embedding,
     }).select().single();
 
     if (error) return Response.json({ error: error.message }, { status: 500, headers: CORS });

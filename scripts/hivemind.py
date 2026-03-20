@@ -355,19 +355,14 @@ def parse_yes_no(value: str) -> bool:
 
 
 def generate_embedding(text: str) -> list[float] | None:
-    """Generate 384-dim embedding locally using sentence-transformers."""
+    """Generate 384-dim embedding locally if sentence-transformers is available.
+    Returns None if unavailable — the server generates embeddings automatically
+    using Supabase's built-in gte-small model."""
     try:
         from sentence_transformers import SentenceTransformer
-
         model = SentenceTransformer("all-MiniLM-L6-v2")
-        embedding = model.encode(text).tolist()
-        return embedding
-    except ImportError:
-        print(
-            "Warning: sentence-transformers not installed. Submitting without embedding.",
-            file=sys.stderr,
-        )
-        print("Install: pip install sentence-transformers", file=sys.stderr)
+        return model.encode(text).tolist()
+    except Exception:
         return None
 
 
