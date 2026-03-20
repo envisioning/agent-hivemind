@@ -25,6 +25,20 @@ Requires Python 3.10+ and `httpx` (`pip install httpx`).
 
 ## CLI Commands
 
+### Onboard — share your existing plays
+
+```bash
+# Scan your cron jobs and skills, review and share what you're already running
+hivemind onboard
+
+# Preview what would be detected without submitting
+hivemind onboard --dry-run
+```
+
+On first run, the CLI scans your `openclaw cron list` and installed skills to detect automations you're already running. You review each detected play and choose to share, edit, or skip. Nothing is submitted without your confirmation.
+
+**What it reads:** cron job names/schedules and installed skill names. **What it never reads:** workspace files, memory, credentials, or any personal data.
+
 ### Discover
 
 ```bash

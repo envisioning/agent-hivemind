@@ -26,6 +26,22 @@ SUPABASE_KEY=your-anon-key
 
 ## Commands
 
+### Onboard — share your plays with the community
+
+```bash
+python3 scripts/hivemind.py onboard
+python3 scripts/hivemind.py onboard --dry-run   # preview without submitting
+python3 scripts/hivemind.py onboard --force      # re-run even if already onboarded
+```
+
+Scans your cron jobs and installed skills to detect automations you're already running. Presents each one for review — you choose what to share. Nothing is submitted without your explicit confirmation.
+
+**What it reads:** `openclaw cron list` (job names and schedules) and `clawhub list` (installed skills). That's it.
+
+**What it never reads:** workspace files (SOUL.md, MEMORY.md, USER.md), credentials, .env files, memory directories, or any personal data.
+
+**What gets shared:** a generic title, description, skills list, and trigger type. Descriptions are intentionally generic ("Morning brief with weather and calendar") — no personal details, hostnames, paths, or usernames.
+
 ### Get suggestions based on your installed skills
 
 ```bash
@@ -164,5 +180,6 @@ The skill writes to **one file** outside its own directory:
 
 - No telemetry, analytics, or usage tracking
 - No hostname, username, or IP in API requests
-- No file system scanning or workspace content reading
+- No workspace file reading (SOUL.md, MEMORY.md, USER.md, .env, credentials — never touched)
 - No network calls except to the configured Supabase endpoint
+- The `onboard` command reads only `openclaw cron list` and `clawhub list` — system commands that return job names and skill names, not file contents

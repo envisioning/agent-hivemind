@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -22,7 +23,22 @@ import httpx
 CONFIG_FILE = Path.home() / ".openclaw" / "hivemind-config.env"
 CONFIG_CACHE = Path.home() / ".openclaw" / "hivemind-config-cache.json"
 KEY_PATH = Path.home() / ".openclaw" / "hivemind-key.pem"
+ONBOARD_FLAG_PATH = Path.home() / ".openclaw" / "hivemind-onboard-done"
 CONFIG_ENDPOINT = "https://tjcryyjrjxbcjzybzdow.supabase.co/functions/v1/hivemind-config"
+
+ONBOARD_INTRO = """Agent Hivemind — Onboarding
+
+This will scan your OpenClaw cron jobs and installed skills to detect
+automations you're already running. You can review each one and choose
+to share it with the hivemind community.
+
+What gets shared: title, description, skills used, trigger type, effort/value estimate.
+What stays private: your workspace files, memory, credentials, config, personal data.
+Your identity: an anonymous hash (not reversible to you).
+
+Continue? [Y/n] """
+
+ONBOARD_TIP = "Tip: run 'hivemind onboard' to share your plays with the community."
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -251,6 +267,24 @@ class ApiError(RuntimeError):
     pass
 
 
+@dataclass
+class DetectedPlay:
+    title: str
+    description: str
+    skills: list[str]
+    trigger: str
+    effort: str
+    value: str
+    schedule: str | None = None
+
+
+@dataclass
+class OnboardScanResult:
+    cron_jobs: list[dict[str, Any]]
+    installed_skills: list[str]
+    cron_failed: bool
+
+
 async def api_post_function(
     client: httpx.AsyncClient,
     ctx: AppContext,
@@ -376,6 +410,395 @@ def list_installed_skills() -> list[str]:
         for d in os.listdir(skills_dir)
         if os.path.isfile(os.path.join(skills_dir, d, "SKILL.md")) and not d.startswith("_")
     ]
+
+
+def command_exists(name: str) -> bool:
+    return subprocess.run(["which", name], capture_output=True, text=True).returncode == 0
+
+
+def run_local_command(cmd: list[str], timeout: int = 20) -> tuple[bool, str, str]:
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
+    except Exception as exc:
+        return False, "", str(exc)
+
+
+def sanitize_generic_text(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    # Remove paths, emails, IPs, and collapse whitespace.
+    text = re.sub(r"(?:[A-Za-z]:\\|~?/|/)[^\s,;]+", "", text)
+    text = re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", "", text)
+    text = re.sub(r"\b[^@\s]+@[^@\s]+\.[^@\s]+\b", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:120]
+
+
+def parse_skills_from_text(text: str, installed_skills: list[str]) -> set[str]:
+    lowered = text.lower()
+    return {skill for skill in installed_skills if skill.lower() in lowered}
+
+
+def parse_clawhub_list(stdout: str) -> list[str]:
+    skills: list[str] = []
+    seen: set[str] = set()
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if set(line) <= {"-", "=", "|"}:
+            continue
+        lowered = line.lower()
+        if lowered.startswith("installed") or lowered.startswith("available"):
+            continue
+        # Accept common skill slug characters.
+        m = re.match(r"^[-*]?\s*([a-z0-9][a-z0-9._-]{1,63})\b", lowered)
+        if not m:
+            continue
+        skill = m.group(1)
+        if skill in {"name", "skill", "skills", "id"}:
+            continue
+        if skill not in seen:
+            seen.add(skill)
+            skills.append(skill)
+    return skills
+
+
+def _extract_jobs_from_cron_json(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("jobs", "crons", "items", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _extract_schedule(job: dict[str, Any]) -> str | None:
+    for key in ("schedule", "cron", "expression", "spec"):
+        value = job.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    trigger = job.get("trigger")
+    if isinstance(trigger, dict):
+        for key in ("schedule", "cron", "expression"):
+            value = trigger.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _extract_name(job: dict[str, Any]) -> str:
+    for key in ("name", "title", "id", "job"):
+        value = job.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "Cron automation"
+
+
+def _extract_skills_from_obj(value: Any, installed_skills: list[str], out: set[str]) -> None:
+    if isinstance(value, str):
+        out.update(parse_skills_from_text(value, installed_skills))
+        return
+    if isinstance(value, list):
+        for item in value:
+            _extract_skills_from_obj(item, installed_skills, out)
+        return
+    if not isinstance(value, dict):
+        return
+    for key, inner in value.items():
+        lowered = str(key).lower()
+        if lowered in {"skill", "skills", "tool", "tools", "target_skill", "target_skills"}:
+            if isinstance(inner, str):
+                out.update(parse_skills_from_text(inner, installed_skills))
+            elif isinstance(inner, list):
+                for item in inner:
+                    if isinstance(item, str):
+                        out.update(parse_skills_from_text(item, installed_skills))
+        _extract_skills_from_obj(inner, installed_skills, out)
+
+
+def _normalize_title_from_job_name(job_name: str) -> str:
+    cleaned = sanitize_generic_text(job_name)
+    words = re.findall(r"[A-Za-z0-9]+", cleaned)
+    if not words:
+        return "Cron automation"
+    # Keep generic short title.
+    title = " ".join(words[:6]).strip()
+    return title.capitalize() if title else "Cron automation"
+
+
+KNOWN_PATTERNS: list[dict[str, Any]] = [
+    {
+        "required": {"weather", "calendar"},
+        "title": "Morning daily brief",
+        "description": (
+            "Automated morning summary combining weather and calendar events."
+        ),
+    },
+    {
+        "required": {"weather", "calendar", "todoist"},
+        "title": "Morning daily brief",
+        "description": (
+            "Automated morning summary combining weather, calendar events, and todo items."
+        ),
+    },
+    {
+        "required": {"gmail", "todoist"},
+        "title": "Email to tasks sync",
+        "description": (
+            "Automates extracting action items from email and creating tasks."
+        ),
+    },
+    {
+        "required": {"github", "calendar"},
+        "title": "Daily engineering standup",
+        "description": (
+            "Generates a daily standup summary from code activity and scheduled meetings."
+        ),
+    },
+]
+
+
+def detect_play_patterns(scan: OnboardScanResult) -> list[DetectedPlay]:
+    detected: list[DetectedPlay] = []
+    installed_set = set(scan.installed_skills)
+    seen_keys: set[tuple[str, str, tuple[str, ...], str | None]] = set()
+
+    for job in scan.cron_jobs:
+        name = _extract_name(job)
+        schedule = _extract_schedule(job)
+        job_skills: set[str] = set()
+        _extract_skills_from_obj(job, scan.installed_skills, job_skills)
+        job_skills.update(parse_skills_from_text(name, scan.installed_skills))
+        if not job_skills:
+            text_blob = json.dumps(job, ensure_ascii=True)
+            job_skills.update(parse_skills_from_text(text_blob, scan.installed_skills))
+
+        title = _normalize_title_from_job_name(name)
+        description = f"Automated '{title}' workflow."
+        if schedule:
+            description += f" Runs on cron schedule ({schedule})."
+
+        best_pattern: dict[str, Any] | None = None
+        for pattern in KNOWN_PATTERNS:
+            required = pattern["required"]
+            if required.issubset(job_skills):
+                if best_pattern is None or len(required) > len(best_pattern["required"]):
+                    best_pattern = pattern
+
+        if best_pattern:
+            title = best_pattern["title"]
+            description = best_pattern["description"]
+            if schedule:
+                description += f" Triggered by cron ({schedule})."
+
+        ordered_skills = sorted(job_skills)
+        key = (title.lower(), "cron", tuple(ordered_skills), schedule)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        detected.append(
+            DetectedPlay(
+                title=title,
+                description=sanitize_generic_text(description),
+                skills=ordered_skills,
+                trigger="cron",
+                effort="low",
+                value="medium",
+                schedule=schedule,
+            )
+        )
+
+    if scan.cron_failed or not scan.cron_jobs:
+        for pattern in KNOWN_PATTERNS:
+            required = pattern["required"]
+            if required.issubset(installed_set):
+                ordered_skills = sorted(required)
+                key = (pattern["title"].lower(), "manual", tuple(ordered_skills), None)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                detected.append(
+                    DetectedPlay(
+                        title=pattern["title"],
+                        description=pattern["description"],
+                        skills=ordered_skills,
+                        trigger="manual",
+                        effort="medium",
+                        value="medium",
+                        schedule=None,
+                    )
+                )
+    return detected
+
+
+def scan_openclaw_for_onboarding() -> OnboardScanResult:
+    installed_skills: list[str] = []
+    cron_jobs: list[dict[str, Any]] = []
+    cron_failed = False
+
+    if command_exists("clawhub"):
+        ok, stdout, _stderr = run_local_command(["clawhub", "list"])
+        if ok and stdout:
+            installed_skills = parse_clawhub_list(stdout)
+    if not installed_skills:
+        installed_skills = list_installed_skills()
+
+    if command_exists("openclaw"):
+        ok, stdout, stderr = run_local_command(["openclaw", "cron", "list", "--json"])
+        if ok and stdout:
+            try:
+                payload = json.loads(stdout)
+                cron_jobs = _extract_jobs_from_cron_json(payload)
+            except json.JSONDecodeError:
+                cron_failed = True
+                print("Warning: openclaw cron list --json returned invalid JSON; using skills-only matching.")
+        else:
+            cron_failed = True
+            if stderr:
+                print(f"Warning: openclaw cron list failed; using skills-only matching. ({stderr})")
+            else:
+                print("Warning: openclaw cron list failed; using skills-only matching.")
+    else:
+        cron_failed = True
+        print("Warning: openclaw CLI not found; using skills-only matching.")
+
+    return OnboardScanResult(
+        cron_jobs=cron_jobs,
+        installed_skills=sorted(set(installed_skills)),
+        cron_failed=cron_failed,
+    )
+
+
+def should_continue_prompt() -> bool:
+    answer = input(ONBOARD_INTRO).strip()
+    return answer == "" or answer.lower() in {"y", "yes"}
+
+
+def prompt_detected_play_action(play: DetectedPlay) -> str:
+    print(f'Detected play: "{play.title}"')
+    print(f"Skills: {', '.join(play.skills) if play.skills else '<none detected>'}")
+    if play.trigger == "cron":
+        trigger_line = f"cron ({play.schedule})" if play.schedule else "cron"
+    else:
+        trigger_line = play.trigger
+    print(f"Trigger: {trigger_line}")
+    print()
+    print(f"Draft description: {play.description}")
+    print()
+    while True:
+        action = input("[S]hare  [E]dit description  [s]kip  [q]uit ").strip()
+        if action in {"S", "E", "s", "q"}:
+            return action
+        if action.lower() in {"share", "edit", "skip", "quit"}:
+            return {"share": "S", "edit": "E", "skip": "s", "quit": "q"}[action.lower()]
+        print("Invalid choice. Choose S, E, s, or q.")
+
+
+async def submit_detected_play(
+    client: httpx.AsyncClient,
+    ctx: AppContext,
+    play: DetectedPlay,
+) -> dict[str, Any]:
+    payload = {
+        "action": "submit-play",
+        "title": play.title,
+        "description": play.description,
+        "skills": play.skills,
+        "trigger": play.trigger,
+        "effort": play.effort,
+        "value": play.value,
+        "source": "onboard",
+        "os": sys.platform,
+    }
+    return await api_post_function(client, ctx, "submit-play", payload)
+
+
+def mark_onboard_done(path: Path = ONBOARD_FLAG_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+
+
+async def cmd_onboard(ctx: AppContext, args: argparse.Namespace) -> None:
+    explicit_run = getattr(args, "explicit_onboard", False)
+    if ONBOARD_FLAG_PATH.exists() and not args.force and not explicit_run:
+        print("Onboarding already completed. Use --force to run again.")
+        return
+
+    if not should_continue_prompt():
+        print("Cancelled.")
+        return
+
+    scan = scan_openclaw_for_onboarding()
+    if not scan.cron_jobs and not scan.installed_skills:
+        print("Nothing detected.")
+        mark_onboard_done()
+        return
+
+    plays = detect_play_patterns(scan)
+    if not plays:
+        print("Nothing detected.")
+        mark_onboard_done()
+        return
+
+    shared = 0
+    skipped = 0
+    failed = 0
+    quit_early = False
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for play in plays:
+            action = prompt_detected_play_action(play)
+            if action == "q":
+                quit_early = True
+                break
+            if action == "s":
+                skipped += 1
+                print()
+                continue
+            if action == "E":
+                edited = input("New description: ").strip()
+                if edited:
+                    play.description = sanitize_generic_text(edited)
+                if not play.description:
+                    play.description = "Automated workflow shared from onboarding."
+
+            if args.dry_run:
+                shared += 1
+                print(f"Dry run: would share '{play.title}'.")
+                print()
+                continue
+
+            try:
+                result = await submit_detected_play(client, ctx, play)
+                shared += 1
+                print(f"Shared: {result.get('title', play.title)} ({str(result.get('id', ''))[:8]})")
+            except ApiError as exc:
+                failed += 1
+                print(f"Submit failed for '{play.title}': {exc}")
+            except httpx.RequestError as exc:
+                failed += 1
+                print(f"Submit failed for '{play.title}': {exc}")
+            print()
+
+    mark_onboard_done()
+    mode = "dry-run" if args.dry_run else "live"
+    tail = " (stopped early)" if quit_early else ""
+    print(
+        f"Onboarding complete ({mode}){tail}. "
+        f"Detected: {len(plays)} | Shared: {shared} | Skipped: {skipped} | Failed: {failed}"
+    )
 
 
 def render_comments_threaded(comments: list[dict[str, Any]]) -> str:
@@ -672,6 +1095,10 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
 
 
 async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
+    if not ONBOARD_FLAG_PATH.exists():
+        print(ONBOARD_TIP)
+        print()
+
     my_skills = list_installed_skills()
     if not my_skills:
         print("No skills detected. Install some skills first!")
@@ -793,6 +1220,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("suggest", help="Get personalized suggestions")
     p.add_argument("--limit", type=int, default=10)
 
+    p = sub.add_parser("onboard", help="Detect and share your existing automations")
+    p.add_argument("--force", action="store_true", help="Run even if already onboarded")
+    p.add_argument("--dry-run", action="store_true", help="Show what would be shared without submitting")
+    p.set_defaults(explicit_onboard=True)
+
     p = sub.add_parser("replicate", help="Report replication of a play")
     p.add_argument("play_id")
     p.add_argument("--outcome", required=True, choices=["success", "partial", "failed"])
@@ -825,6 +1257,7 @@ async def run() -> int:
         "contribute": cmd_contribute,
         "search": cmd_search,
         "suggest": cmd_suggest,
+        "onboard": cmd_onboard,
         "replicate": cmd_replicate,
         "skills-with": cmd_skills_with,
     }
