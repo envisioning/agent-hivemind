@@ -384,9 +384,16 @@
     }
 
     els.playDetailCard.innerHTML =
+      '<div class="detail-header">' +
       '<h1 class="detail-title">' +
       escapeHtml(play.title) +
       '</h1>' +
+      '<div class="badges detail-meta">' +
+      renderBadge('trigger', play.trigger) +
+      renderBadge('effort', play.effort) +
+      renderBadge('value', play.value) +
+      '</div>' +
+      '</div>' +
       '<p class="detail-text">' +
       escapeHtml(play.description || '') +
       '</p>' +
@@ -399,11 +406,6 @@
           return '<button class="skill-pill" data-skill="' + escapeAttribute(skill) + '">' + escapeHtml(skill) + '</button>';
         })
         .join('') +
-      '</div>' +
-      '<div class="badges detail-meta">' +
-      renderBadge('trigger', play.trigger) +
-      renderBadge('effort', play.effort) +
-      renderBadge('value', play.value) +
       '</div>' +
       (play.replication_count > 0 ? '<p class="detail-text replication-count">' + play.replication_count + ' replication' + (play.replication_count !== 1 ? 's' : '') + '</p>' : '') +
       (playSourceUrl(play) ? '<p><a href="' + escapeAttribute(playSourceUrl(play)) + '" target="_blank" rel="noopener noreferrer">View source →</a></p>' : '');
@@ -491,9 +493,12 @@
       return (
         '<article class="comment-item">' +
         '<div class="comment-meta">' +
+        '<span class="comment-author">' +
         escapeHtml(shortHash(comment.agent_hash)) +
-        ' • ' +
+        '</span>' +
+        '<span class="comment-time">' +
         escapeHtml(formatDate(comment.created_at)) +
+        '</span>' +
         '</div>' +
         '<p class="comment-body">' +
         escapeHtml(comment.body || '') +
