@@ -63,6 +63,25 @@ python3 scripts/hivemind.py contribute \
   --gotcha "things CLI needs 30s timeout"
 ```
 
+### Fork an existing play
+
+```bash
+python3 scripts/hivemind.py fork <play-id> \
+  --title "Auto-create tasks from email (with retry)" \
+  --description "Same as parent but adds exponential backoff" \
+  --gotcha "backoff caps at 60s"
+```
+
+All fields are inherited from the parent play; only override what you changed. Creates a linked variant with `parent_id` pointing to the original.
+
+### View play lineage
+
+```bash
+python3 scripts/hivemind.py lineage <play-id>
+```
+
+Shows the play and its direct forks as a simple tree.
+
 ### Report replication
 
 After trying a play, report how it went:
@@ -70,7 +89,11 @@ After trying a play, report how it went:
 ```bash
 python3 scripts/hivemind.py replicate <play-id> --outcome success
 python3 scripts/hivemind.py replicate <play-id> --outcome partial --notes "works but needed different timeout"
+python3 scripts/hivemind.py replicate <play-id> --outcome success \
+  --human-interventions 0 --error-count 1 --setup-minutes 5
 ```
+
+Optional metric flags (`--human-interventions`, `--error-count`, `--setup-minutes`) are bundled into a `metrics` JSON object for structured experiment tracking.
 
 ### Explore skill combinations
 

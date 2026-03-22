@@ -320,6 +320,25 @@ def parse_yes_no(value: str) -> bool:
     raise argparse.ArgumentTypeError("Use yes or no")
 
 
+def parse_skills_csv(raw: str) -> list[str]:
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
+def trigger_weight(trigger: str | None) -> int:
+    if not trigger:
+        return 0
+    if trigger == "cron":
+        return 2
+    if trigger in {"reactive", "event"}:
+        return 1
+    return 0
+
+
+def complexity_score(play: dict[str, Any]) -> int:
+    skills = play.get("skills") or []
+    return len(skills) + trigger_weight(play.get("trigger"))
+
+
 def generate_embedding(text: str) -> list[float] | None:
     """Generate 384-dim embedding locally using sentence-transformers."""
     try:
@@ -554,7 +573,7 @@ async def cmd_notify_prefs(ctx: AppContext, args: argparse.Namespace) -> None:
 
 
 async def cmd_contribute(ctx: AppContext, args: argparse.Namespace) -> None:
-    skills = [s.strip() for s in args.skills.split(",")]
+    skills = parse_skills_csv(args.skills)
     embed_text = f"{args.title}. {args.description}"
     embedding = generate_embedding(embed_text)
 
@@ -576,10 +595,81 @@ async def cmd_contribute(ctx: AppContext, args: argparse.Namespace) -> None:
     print(f"Skills: {', '.join(result['skills'])}")
 
 
+async def fetch_play_metadata(
+    client: httpx.AsyncClient,
+    ctx: AppContext,
+    play_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    ids = [str(i) for i in play_ids if i]
+    if not ids:
+        return {}
+    rows = await api_get_rest(
+        client,
+        ctx,
+        "plays",
+        {
+            "id": f"in.({','.join(ids)})",
+            "select": "id,skills,trigger,parent_id,title",
+            "limit": str(max(len(ids), 1)),
+        },
+    )
+    return {str(r["id"]): r for r in rows}
+
+
+async def fetch_parent_titles(
+    client: httpx.AsyncClient,
+    ctx: AppContext,
+    plays: list[dict[str, Any]],
+) -> dict[str, str]:
+    parent_ids = sorted({str(p.get("parent_id")) for p in plays if p.get("parent_id")})
+    if not parent_ids:
+        return {}
+    parent_rows = await api_get_rest(
+        client,
+        ctx,
+        "plays",
+        {
+            "id": f"in.({','.join(parent_ids)})",
+            "select": "id,title",
+            "limit": str(max(len(parent_ids), 1)),
+        },
+    )
+    return {str(row["id"]): row.get("title", "Unknown parent") for row in parent_rows}
+
+
+def print_play(
+    index: int,
+    play: dict[str, Any],
+    parent_titles: dict[str, str],
+    indent: str = "",
+) -> None:
+    reps = play.get("replication_count") or 0
+    parent_id = play.get("parent_id")
+    fork_note = ""
+    if parent_id:
+        parent_title = parent_titles.get(str(parent_id), "Unknown parent")
+        fork_note = f" (fork of {parent_title})"
+    print(f"\n{indent}{index}. {play['title']}{fork_note}")
+    if play.get("description"):
+        print(f"{indent}   {truncate(play['description'], 120)}")
+    if play.get("skills") is not None:
+        skills_str = ", ".join(play["skills"])
+        print(f"{indent}   Skills: {skills_str}")
+    complexity = play.get("complexity")
+    if complexity is None and play.get("skills") is not None:
+        complexity = complexity_score(play)
+    print(
+        f"{indent}   Effort: {play.get('effort', '?')} | Value: {play.get('value', '?')} | "
+        f"Complexity: {complexity if complexity is not None else '?'} | Replications: {reps}"
+    )
+    if play.get("gotcha"):
+        print(f"{indent}   Gotcha: {play['gotcha']}")
+
+
 async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
     async with httpx.AsyncClient(timeout=20.0) as client:
         if args.skills:
-            skill_list = [s.strip() for s in args.skills.split(",")]
+            skill_list = parse_skills_csv(args.skills)
             plays = await api_get_rest(
                 client,
                 ctx,
@@ -588,7 +678,7 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                     "skills": f"ov.{{{','.join(skill_list)}}}",
                     "order": "replication_count.desc",
                     "limit": str(args.limit),
-                    "select": "id,title,description,skills,effort,value,gotcha,replication_count",
+                    "select": "id,title,description,skills,trigger,parent_id,effort,value,gotcha,replication_count",
                 },
             )
         elif args.query:
@@ -613,7 +703,7 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                         "or": f"(title.ilike.*{args.query}*,description.ilike.*{args.query}*)",
                         "order": "replication_count.desc",
                         "limit": str(args.limit),
-                        "select": "id,title,description,skills,effort,value,gotcha,replication_count",
+                        "select": "id,title,description,skills,trigger,parent_id,effort,value,gotcha,replication_count",
                     },
                 )
         else:
@@ -624,7 +714,7 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                 {
                     "order": "replication_count.desc",
                     "limit": str(args.limit),
-                    "select": "id,title,description,skills,effort,value,gotcha,replication_count",
+                    "select": "id,title,description,skills,trigger,parent_id,effort,value,gotcha,replication_count",
                 },
             )
 
@@ -632,14 +722,17 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
         print("No plays found.")
         return
 
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        metadata = await fetch_play_metadata(client, ctx, [str(p.get("id", "")) for p in plays])
+        for p in plays:
+            meta = metadata.get(str(p.get("id", "")), {})
+            for key in ("skills", "trigger", "parent_id", "title"):
+                if key not in p and key in meta:
+                    p[key] = meta[key]
+        parent_titles = await fetch_parent_titles(client, ctx, plays)
+
     for i, p in enumerate(plays, 1):
-        skills_str = ", ".join(p["skills"])
-        reps = p["replication_count"] or 0
-        print(f"\n{i}. {p['title']}")
-        print(f"   Skills: {skills_str}")
-        print(f"   Effort: {p.get('effort', '?')} | Value: {p.get('value', '?')} | Replications: {reps}")
-        if p.get("gotcha"):
-            print(f"   Gotcha: {p['gotcha']}")
+        print_play(i, p, parent_titles)
 
 
 async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
@@ -675,37 +768,59 @@ async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
     ready = [p for p in result if not p.get("missing_skills") or len(p["missing_skills"]) == 0]
     needs_install = [p for p in result if p.get("missing_skills") and len(p["missing_skills"]) > 0]
 
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        metadata = await fetch_play_metadata(client, ctx, [str(p.get("id", "")) for p in result])
+        for p in result:
+            meta = metadata.get(str(p.get("id", "")), {})
+            for key in ("skills", "trigger", "parent_id", "title"):
+                if key not in p and key in meta:
+                    p[key] = meta[key]
+        parent_titles = await fetch_parent_titles(client, ctx, result)
+
     if ready:
         print(f"Ready to try ({len(ready)}):\n")
         for i, p in enumerate(ready, 1):
-            reps = p["replication_count"] or 0
-            print(f"  {i}. {p['title']}")
-            print(f"     {p['description'][:120]}")
-            print(f"     Effort: {p.get('effort', '?')} | Value: {p.get('value', '?')} | Replications: {reps}")
-            if p.get("gotcha"):
-                print(f"     Gotcha: {p['gotcha']}")
+            print_play(i, p, parent_titles, indent="  ")
             print()
 
     if needs_install:
         print(f"\nNeed 1+ more skill ({len(needs_install)}):\n")
         for p in needs_install[:5]:
             missing = ", ".join(p["missing_skills"])
-            print(f"  - {p['title']} (install: {missing})")
+            parent_id = p.get("parent_id")
+            fork_note = ""
+            if parent_id:
+                parent_title = parent_titles.get(str(parent_id), "Unknown parent")
+                fork_note = f" (fork of {parent_title})"
+            complexity = p.get("complexity")
+            if complexity is None and p.get("skills") is not None:
+                complexity = complexity_score(p)
+            print(
+                f"  - {p['title']}{fork_note} (install: {missing}) "
+                f"[Complexity: {complexity if complexity is not None else '?'}]"
+            )
 
 
 async def cmd_replicate(ctx: AppContext, args: argparse.Namespace) -> None:
+    metrics: dict[str, int] = {}
+    if args.human_interventions is not None:
+        metrics["human_interventions"] = args.human_interventions
+    if args.error_count is not None:
+        metrics["error_count"] = args.error_count
+    if args.setup_minutes is not None:
+        metrics["setup_minutes"] = args.setup_minutes
+
+    payload: dict[str, Any] = {
+        "action": "replicate",
+        "play_id": args.play_id,
+        "outcome": args.outcome,
+        "notes": args.notes,
+    }
+    if metrics:
+        payload["metrics"] = metrics
+
     async with httpx.AsyncClient(timeout=20.0) as client:
-        await api_post_function(
-            client,
-            ctx,
-            "submit-play",
-            {
-                "action": "replicate",
-                "play_id": args.play_id,
-                "outcome": args.outcome,
-                "notes": args.notes,
-            },
-        )
+        await api_post_function(client, ctx, "submit-play", payload)
     print(f"Replication recorded: {args.outcome}")
 
 
@@ -726,6 +841,103 @@ async def cmd_skills_with(ctx: AppContext, args: argparse.Namespace) -> None:
     print(f"Skills commonly used with '{args.skill}':\n")
     for r in result:
         print(f"  {r['co_skill']}: {r['frequency']} plays")
+
+
+async def cmd_fork(ctx: AppContext, args: argparse.Namespace) -> None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        parent_rows = await api_get_rest(
+            client,
+            ctx,
+            "plays",
+            {
+                "id": f"eq.{args.play_id}",
+                "select": "id,title,description,skills,trigger,effort,value,gotcha",
+                "limit": "1",
+            },
+        )
+        if not parent_rows:
+            raise ApiError(f"Parent play not found: {args.play_id}")
+        parent = parent_rows[0]
+
+        title = args.title if args.title is not None else parent.get("title")
+        description = args.description if args.description is not None else parent.get("description")
+        skills = parse_skills_csv(args.skills) if args.skills else parent.get("skills") or []
+        trigger = args.trigger if args.trigger is not None else parent.get("trigger")
+        effort = args.effort if args.effort is not None else parent.get("effort")
+        value = args.value if args.value is not None else parent.get("value")
+        gotcha = args.gotcha if args.gotcha is not None else parent.get("gotcha")
+
+        embed_text = f"{title}. {description}"
+        embedding = generate_embedding(embed_text)
+
+        payload = {
+            "action": "submit-play",
+            "title": title,
+            "description": description,
+            "skills": skills,
+            "trigger": trigger,
+            "effort": effort,
+            "value": value,
+            "gotcha": gotcha,
+            "os": args.os or sys.platform,
+            "embedding": embedding,
+            "parent_id": parent["id"],
+        }
+        result = await api_post_function(client, ctx, "submit-play", payload)
+
+    print(f"Fork created: {result['title']} (id: {result['id'][:8]}...)")
+    print(f"Parent: {parent['title']} ({parent['id']})")
+    print(f"Skills: {', '.join(result.get('skills') or skills)}")
+
+
+async def cmd_lineage(ctx: AppContext, args: argparse.Namespace) -> None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        rows = await api_get_rest(
+            client,
+            ctx,
+            "plays",
+            {
+                "or": f"(id.eq.{args.play_id},parent_id.eq.{args.play_id})",
+                "select": "id,title,parent_id,created_at",
+                "order": "created_at.asc",
+                "limit": str(max(args.limit, 2)),
+            },
+        )
+
+        if not rows:
+            print("No lineage found.")
+            return
+
+        by_id = {str(r["id"]): r for r in rows}
+        root = by_id.get(args.play_id)
+        if root is None:
+            play_rows = await api_get_rest(
+                client,
+                ctx,
+                "plays",
+                {
+                    "id": f"eq.{args.play_id}",
+                    "select": "id,title,parent_id,created_at",
+                    "limit": "1",
+                },
+            )
+            if not play_rows:
+                print("No lineage found.")
+                return
+            root = play_rows[0]
+            rows.append(root)
+            by_id[str(root["id"])] = root
+
+    children: list[dict[str, Any]] = [r for r in rows if str(r.get("parent_id")) == str(root["id"])]
+    children.sort(key=lambda x: x.get("created_at", ""))
+
+    print(f"{root['title']} ({str(root['id'])[:8]})")
+    if not children:
+        print("└─ no forks")
+        return
+    for idx, child in enumerate(children):
+        branch = "└─" if idx == len(children) - 1 else "├─"
+        print(f"{branch} {child['title']} ({str(child['id'])[:8]})")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -775,6 +987,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("play_id")
     p.add_argument("--outcome", required=True, choices=["success", "partial", "failed"])
     p.add_argument("--notes", help="What was different in your setup")
+    p.add_argument("--human-interventions", type=int, help="Number of manual assists needed")
+    p.add_argument("--error-count", type=int, help="Number of errors encountered")
+    p.add_argument("--setup-minutes", type=int, help="Initial setup duration in minutes")
+
+    p = sub.add_parser("fork", help="Fork an existing play, inheriting fields by default")
+    p.add_argument("play_id", help="Parent play ID")
+    p.add_argument("--title", help="Override title")
+    p.add_argument("--description", help="Override description")
+    p.add_argument("--skills", help="Override skills (comma-separated)")
+    p.add_argument("--trigger", choices=["cron", "manual", "reactive", "event"], help="Override trigger")
+    p.add_argument("--effort", choices=["low", "medium", "high"], help="Override effort")
+    p.add_argument("--value", choices=["low", "medium", "high"], help="Override value")
+    p.add_argument("--gotcha", help="Override gotcha")
+    p.add_argument("--os", help="Operating system (auto-detected if omitted)")
+
+    p = sub.add_parser("lineage", help="Show a play and its direct forks")
+    p.add_argument("play_id")
+    p.add_argument("--limit", type=int, default=100)
 
     p = sub.add_parser("skills-with", help="Skills commonly used with a given skill")
     p.add_argument("skill")
@@ -804,6 +1034,8 @@ async def run() -> int:
         "search": cmd_search,
         "suggest": cmd_suggest,
         "replicate": cmd_replicate,
+        "fork": cmd_fork,
+        "lineage": cmd_lineage,
         "skills-with": cmd_skills_with,
     }
 
