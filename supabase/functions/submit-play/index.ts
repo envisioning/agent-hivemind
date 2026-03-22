@@ -74,6 +74,7 @@ Deno.serve(async (req) => {
       openclaw_version: body.openclaw_version || null,
       agent_hash: agentHash,
       embedding: embedding,
+      parent_id: body.parent_id || null,
     }).select().single();
 
     if (error) return Response.json({ error: error.message }, { status: 500, headers: CORS });
@@ -95,6 +96,7 @@ Deno.serve(async (req) => {
       agent_hash: agentHash,
       outcome: body.outcome,
       notes: body.notes || null,
+      metrics: body.metrics || null,
     }).select().single();
 
     if (error) {
