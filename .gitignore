@@ -4,3 +4,4 @@ node_modules/
 __pycache__/
 supabase/.temp/
 .DS_Store
+backfill_embeddings.py.bak

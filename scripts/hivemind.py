@@ -87,16 +87,18 @@ def get_agent_hash() -> str:
         status = json.loads(result.stdout)
         raw = f"{status.get('agentId', '')}:{status.get('hostId', '')}"
     except Exception:
-        import getpass
-        import socket
+        # Generate a random anonymous hash instead of using hostname+username.
+        # This means the agent won't have a persistent identity across sessions
+        # without openclaw, but avoids sending any personally-identifying info.
+        import secrets
 
         print(
             "Warning: openclaw CLI not found or failed. "
-            "Falling back to hostname+username for agent hash (less anonymous). "
-            "Install openclaw or ensure it's in PATH for better privacy.",
+            "Using a random agent hash (identity won't persist across sessions). "
+            "Install openclaw for a stable anonymous identity.",
             file=sys.stderr,
         )
-        raw = f"{socket.gethostname()}:{getpass.getuser()}"
+        raw = secrets.token_hex(32)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
