@@ -158,7 +158,7 @@
 
   async function fetchPlays() {
     var url = new URL('/rest/v1/plays', state.config.supabase_url);
-    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,source,replication_count,created_at');
+    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,source,replication_count,created_at,risk_card');
     url.searchParams.set('order', 'title');
 
     var response = await fetch(url.toString(), {
@@ -408,6 +408,7 @@
         })
         .join('') +
       '</div>' +
+      renderRiskDetail(play.risk_card) +
       (play.replication_count > 0 ? '<p class="detail-text replication-count">' + play.replication_count + ' replication' + (play.replication_count !== 1 ? 's' : '') + '</p>' : '') +
       (playSourceUrl(play) ? '<p><a href="' + escapeAttribute(playSourceUrl(play)) + '" target="_blank" rel="noopener noreferrer">View source →</a></p>' : '');
 
@@ -558,9 +559,53 @@
       '<div class="badges">' +
       renderBadge('effort', play.effort) +
       renderBadge('value', play.value) +
+      renderRiskBadge(play.risk_card) +
       '</div>' +
       '</article>'
     );
+  }
+
+  function renderRiskBadge(riskCard) {
+    if (!riskCard || !riskCard.overall) return '';
+    var level = riskCard.overall;
+    var label = level === 'medium' ? 'med' : level;
+    return '<span class="badge risk-' + level + '" title="Risk: ' + level + '">risk: ' + label + '</span>';
+  }
+
+  function renderRiskDetail(riskCard) {
+    if (!riskCard || !riskCard.overall) return '';
+    var dims = riskCard.dimensions || {};
+    var dimNames = ['security', 'privacy', 'destructiveness', 'cost', 'external_side_effects', 'supply_chain', 'reversibility', 'autonomy'];
+    var hasDims = dimNames.some(function (d) { return dims[d] && dims[d] !== 'low'; });
+    if (!hasDims && riskCard.overall === 'low') return renderRiskBadge(riskCard);
+
+    var html = '<div class="risk-detail">' +
+      '<div class="risk-detail-header">' +
+      '<span class="badge risk-' + riskCard.overall + '">risk: ' + (riskCard.overall === 'medium' ? 'med' : riskCard.overall) + '</span>' +
+      '<span class="risk-confidence">confidence: ' + Math.round((riskCard.confidence || 0) * 100) + '%</span>' +
+      '</div>' +
+      '<div class="risk-dimensions">';
+
+    for (var i = 0; i < dimNames.length; i++) {
+      var dim = dimNames[i];
+      var val = dims[dim] || 'low';
+      if (val === 'low') continue;
+      var dimLabel = dim.replace(/_/g, ' ');
+      html += '<span class="risk-dim risk-' + val + '">' + dimLabel + '</span>';
+    }
+
+    html += '</div>';
+
+    if (riskCard.flags && riskCard.flags.length) {
+      html += '<div class="risk-flags">';
+      for (var j = 0; j < riskCard.flags.length; j++) {
+        html += '<span class="risk-flag">' + escapeHtml(riskCard.flags[j].replace(/_/g, ' ')) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
   }
 
   function renderBadge(kind, rawValue) {
@@ -730,7 +775,8 @@
       gotcha: row.gotcha || '',
       source: row.source || '',
       replication_count: row.replication_count || 0,
-      created_at: row.created_at || ''
+      created_at: row.created_at || '',
+      risk_card: row.risk_card || null
     };
   }
 
