@@ -3,6 +3,15 @@
   var TRIGGERS = ['cron', 'manual', 'reactive', 'event'];
   var EFFORTS = ['low', 'medium', 'high'];
   var VALUES = ['low', 'medium', 'high'];
+  var RISK_SIGNAL_CONFIG = [
+    { key: 'has_shell_exec', label: 'Shell / exec', weight: 3, flag: 'executes_shell' },
+    { key: 'writes_files', label: 'File writes', weight: 2, flag: 'writes_files' },
+    { key: 'uses_network', label: 'Network / APIs', weight: 2, flag: 'calls_external_api' },
+    { key: 'uses_credentials', label: 'Credentials', weight: 3, flag: 'uses_credentials' },
+    { key: 'installs_dependencies', label: 'Dependency installs', weight: 2, flag: 'installs_dependencies' },
+    { key: 'persistence_or_autonomy', label: 'Autonomy / persistence', weight: 2, flag: 'persistence_or_autonomy' },
+    { key: 'external_side_effects', label: 'External side effects', weight: 2, flag: 'external_side_effects' }
+  ];
 
   var state = {
     config: null,
@@ -158,7 +167,7 @@
 
   async function fetchPlays() {
     var url = new URL('/rest/v1/plays', state.config.supabase_url);
-    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,source,replication_count,created_at,risk_card');
+    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,source,risk_level,risk_confidence,risk_flags,risk_summary,risk_signals,replication_count,created_at');
     url.searchParams.set('order', 'title');
 
     var response = await fetch(url.toString(), {
@@ -408,7 +417,7 @@
         })
         .join('') +
       '</div>' +
-      renderRiskDetail(play.risk_card) +
+      renderRiskSection(play, play.risk_signals) +
       (play.replication_count > 0 ? '<p class="detail-text replication-count">' + play.replication_count + ' replication' + (play.replication_count !== 1 ? 's' : '') + '</p>' : '') +
       (playSourceUrl(play) ? '<p><a href="' + escapeAttribute(playSourceUrl(play)) + '" target="_blank" rel="noopener noreferrer">View source →</a></p>' : '');
 
@@ -559,53 +568,67 @@
       '<div class="badges">' +
       renderBadge('effort', play.effort) +
       renderBadge('value', play.value) +
-      renderRiskBadge(play.risk_card) +
+      renderRiskBadge(play.risk_level) +
       '</div>' +
       '</article>'
     );
   }
 
-  function renderRiskBadge(riskCard) {
-    if (!riskCard || !riskCard.overall) return '';
-    var level = riskCard.overall;
-    var label = level === 'medium' ? 'med' : level;
-    return '<span class="badge risk-' + level + '" title="Risk: ' + level + '">risk: ' + label + '</span>';
+  function renderRiskBadge(rawLevel) {
+    var level = normalizeRiskLevel(rawLevel);
+    return '<span class="badge risk-' + level + '">risk: ' + level + '</span>';
   }
 
-  function renderRiskDetail(riskCard) {
-    if (!riskCard || !riskCard.overall) return '';
-    var dims = riskCard.dimensions || {};
-    var dimNames = ['security', 'privacy', 'destructiveness', 'cost', 'external_side_effects', 'supply_chain', 'reversibility', 'autonomy'];
-    var hasDims = dimNames.some(function (d) { return dims[d] && dims[d] !== 'low'; });
-    if (!hasDims && riskCard.overall === 'low') return renderRiskBadge(riskCard);
+  function renderRiskSection(play, riskSignals) {
+    var normalizedLevel = normalizeRiskLevel(play.risk_level);
+    var confidence = Number(play.risk_confidence || 0);
+    var confidencePct = Number.isFinite(confidence) ? Math.round(confidence * 100) : 0;
+    var flags = Array.isArray(play.risk_flags) ? play.risk_flags : [];
 
-    var html = '<div class="risk-detail">' +
-      '<div class="risk-detail-header">' +
-      '<span class="badge risk-' + riskCard.overall + '">risk: ' + (riskCard.overall === 'medium' ? 'med' : riskCard.overall) + '</span>' +
-      '<span class="risk-confidence">confidence: ' + Math.round((riskCard.confidence || 0) * 100) + '%</span>' +
+    var signalRows = RISK_SIGNAL_CONFIG.map(function (cfg) {
+      var active = !!(riskSignals && riskSignals[cfg.key]);
+      return (
+        '<li class="risk-signal-item">' +
+        '<span class="risk-signal-name">' + escapeHtml(cfg.label) + '</span>' +
+        '<span class="risk-signal-state ' + (active ? 'on' : 'off') + '">' +
+        (active ? 'Detected (+' + cfg.weight + ')' : 'Not detected') +
+        '</span>' +
+        '</li>'
+      );
+    }).join('');
+
+    var score = computeRiskScore(flags, riskSignals);
+    var explanation = 'Score ' + score + ' using signal weights (shell/credentials +3; others +2). Thresholds: low <3, review 3-5, sensitive 6-8, high 9+.';
+
+    return (
+      '<section class="risk-panel">' +
+      '<h2 class="risk-title">Risk</h2>' +
+      '<div class="risk-overview">' +
+      '<div class="risk-kv"><span class="risk-k">Level</span><span class="risk-v">' + renderRiskBadge(normalizedLevel) + '</span></div>' +
+      '<div class="risk-kv"><span class="risk-k">Confidence</span><span class="risk-v risk-confidence">' + confidencePct + '% (' + confidence.toFixed(3) + ')</span></div>' +
       '</div>' +
-      '<div class="risk-dimensions">';
+      (play.risk_summary ? '<p class="detail-text risk-summary"><strong>Why:</strong> ' + escapeHtml(play.risk_summary) + '</p>' : '') +
+      '<div class="risk-block"><span class="risk-k">Flags</span><div class="risk-flag-pills">' +
+      (flags.length ? flags.map(function (flag) { return '<span class="badge risk-flag">' + escapeHtml(flag) + '</span>'; }).join('') : '<span class="detail-text">No flags</span>') +
+      '</div></div>' +
+      '<div class="risk-block"><span class="risk-k">Detected signals</span><ul class="risk-signals-list">' + signalRows + '</ul></div>' +
+      '<p class="detail-text risk-score-note"><strong>Score model:</strong> ' + escapeHtml(explanation) + '</p>' +
+      '</section>'
+    );
+  }
 
-    for (var i = 0; i < dimNames.length; i++) {
-      var dim = dimNames[i];
-      var val = dims[dim] || 'low';
-      if (val === 'low') continue;
-      var dimLabel = dim.replace(/_/g, ' ');
-      html += '<span class="risk-dim risk-' + val + '">' + dimLabel + '</span>';
+  function computeRiskScore(flags, riskSignals) {
+    if (riskSignals) {
+      return RISK_SIGNAL_CONFIG.reduce(function (sum, cfg) {
+        return sum + (riskSignals[cfg.key] ? cfg.weight : 0);
+      }, 0);
     }
-
-    html += '</div>';
-
-    if (riskCard.flags && riskCard.flags.length) {
-      html += '<div class="risk-flags">';
-      for (var j = 0; j < riskCard.flags.length; j++) {
-        html += '<span class="risk-flag">' + escapeHtml(riskCard.flags[j].replace(/_/g, ' ')) + '</span>';
-      }
-      html += '</div>';
+    if (!Array.isArray(flags)) {
+      return 0;
     }
-
-    html += '</div>';
-    return html;
+    return RISK_SIGNAL_CONFIG.reduce(function (sum, cfg) {
+      return sum + (flags.indexOf(cfg.flag) > -1 ? cfg.weight : 0);
+    }, 0);
   }
 
   function renderBadge(kind, rawValue) {
@@ -776,8 +799,20 @@
       source: row.source || '',
       replication_count: row.replication_count || 0,
       created_at: row.created_at || '',
-      risk_card: row.risk_card || null
+      risk_level: normalizeRiskLevel(row.risk_level),
+      risk_confidence: Number(row.risk_confidence || 0),
+      risk_flags: Array.isArray(row.risk_flags) ? row.risk_flags : [],
+      risk_summary: row.risk_summary || '',
+      risk_signals: row.risk_signals || null
     };
+  }
+
+  function normalizeRiskLevel(level) {
+    var raw = String(level || '').toLowerCase();
+    if (raw === 'low' || raw === 'review' || raw === 'sensitive' || raw === 'high') {
+      return raw;
+    }
+    return 'review';
   }
 
   function normalizeLevel(level) {

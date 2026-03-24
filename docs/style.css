@@ -446,62 +446,10 @@ select:focus {
 .badge[class*="value-low"] { border-color: var(--border); color: var(--muted-foreground); }
 .badge[class*="value-medium"] { border-color: #3b82f640; color: #60a5fa; }
 .badge[class*="value-high"] { border-color: #D6F24940; color: #D6F249; }
-.badge.risk-low { border-color: #22c55e40; color: #4ade80; }
-.badge.risk-medium { border-color: #eab30840; color: #facc15; }
-.badge.risk-high { border-color: #ef444440; color: #f87171; }
-
-.risk-detail {
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--secondary);
-}
-
-.risk-detail-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.risk-confidence {
-  font-size: 11px;
-  color: var(--muted-foreground);
-}
-
-.risk-dimensions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.risk-dim {
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  text-transform: capitalize;
-}
-
-.risk-dim.risk-medium { border-color: #eab30840; color: #facc15; }
-.risk-dim.risk-high { border-color: #ef444440; color: #f87171; }
-
-.risk-flags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.risk-flag {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(161, 161, 170, 0.1);
-  color: var(--muted-foreground);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
+.badge[class*="risk-low"] { border-color: #22c55e40; color: #4ade80; }
+.badge[class*="risk-review"] { border-color: #f59e0b40; color: #fbbf24; }
+.badge[class*="risk-sensitive"] { border-color: #f9731640; color: #fb923c; }
+.badge[class*="risk-high"] { border-color: #ef444440; color: #f87171; }
 
 .empty {
   margin-top: 16px;
@@ -578,6 +526,109 @@ select:focus {
 
 .detail-meta {
   margin-top: 0;
+}
+
+.risk-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--secondary);
+}
+
+.risk-title {
+  margin: 0 0 10px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.risk-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.risk-kv {
+  display: grid;
+  gap: 4px;
+}
+
+.risk-k {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.risk-v {
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.risk-confidence {
+  font-variant-numeric: tabular-nums;
+}
+
+.risk-summary {
+  margin: 12px 0 0;
+}
+
+.risk-block {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.risk-flag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge.risk-flag {
+  border-color: var(--border);
+  color: var(--muted-foreground);
+  text-transform: none;
+}
+
+.risk-signals-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.risk-signal-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 6px;
+}
+
+.risk-signal-name {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.risk-signal-state {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.risk-signal-state.on {
+  color: #fbbf24;
+}
+
+.risk-signal-state.off {
+  color: var(--muted-foreground);
+}
+
+.risk-score-note {
+  margin: 12px 0 0;
+  font-size: 12px;
 }
 
 .replication-count {
