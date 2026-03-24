@@ -3,6 +3,7 @@
   var TRIGGERS = ['cron', 'manual', 'reactive', 'event'];
   var EFFORTS = ['low', 'medium', 'high'];
   var VALUES = ['low', 'medium', 'high'];
+  var RISKS = ['low', 'review', 'sensitive', 'high'];
   var RISK_SIGNAL_CONFIG = [
     { key: 'has_shell_exec', label: 'Shell / exec', weight: 3, flag: 'executes_shell' },
     { key: 'writes_files', label: 'File writes', weight: 2, flag: 'writes_files' },
@@ -41,6 +42,7 @@
     triggerChips: document.getElementById('triggerChips'),
     effortChips: document.getElementById('effortChips'),
     valueChips: document.getElementById('valueChips'),
+    riskChips: document.getElementById('riskChips'),
     skillSelect: document.getElementById('skillSelect'),
     clearFilters: document.getElementById('clearFilters'),
     countLabel: document.getElementById('countLabel'),
@@ -104,6 +106,7 @@
         trigger: new Set(),
         effort: new Set(),
         value: new Set(),
+        risk: new Set(),
         skill: ''
       };
       state.sort = 'title';
@@ -301,6 +304,7 @@
     state.filters.trigger = readSetParam(params.get('trigger'), TRIGGERS);
     state.filters.effort = readSetParam(params.get('effort'), EFFORTS);
     state.filters.value = readSetParam(params.get('value'), VALUES);
+    state.filters.risk = readSetParam(params.get('risk'), RISKS);
 
     var skill = params.get('skill') || '';
     state.filters.skill = state.allSkills.includes(skill) ? skill : '';
@@ -319,6 +323,7 @@
     syncChipGroup(els.triggerChips, state.filters.trigger);
     syncChipGroup(els.effortChips, state.filters.effort);
     syncChipGroup(els.valueChips, state.filters.value);
+    syncChipGroup(els.riskChips, state.filters.risk);
   }
 
   function syncChipGroup(container, selectedSet) {
@@ -663,6 +668,11 @@
       return false;
     }
 
+    var risk = normalizeRiskLevel(play.risk_level);
+    if (filters.risk.size && !filters.risk.has(risk)) {
+      return false;
+    }
+
     if (filters.skill && !(play.skills || []).includes(filters.skill)) {
       return false;
     }
@@ -692,6 +702,7 @@
     buildChipGroup(els.triggerChips, TRIGGERS, 'trigger');
     buildChipGroup(els.effortChips, ['low', 'med', 'high'], 'effort');
     buildChipGroup(els.valueChips, ['low', 'med', 'high'], 'value');
+    buildChipGroup(els.riskChips, RISKS, 'risk');
   }
 
   function buildChipGroup(container, values, key) {
@@ -755,6 +766,7 @@
     if (filters.trigger.size) params.set('trigger', Array.from(filters.trigger).sort().join(','));
     if (filters.effort.size) params.set('effort', Array.from(filters.effort).sort().join(','));
     if (filters.value.size) params.set('value', Array.from(filters.value).sort().join(','));
+    if (filters.risk.size) params.set('risk', Array.from(filters.risk).sort().join(','));
     if (filters.skill) params.set('skill', filters.skill);
     if (sort && sort !== 'title') params.set('sort', sort);
 
@@ -768,6 +780,7 @@
       trigger: new Set(),
       effort: new Set(),
       value: new Set(),
+      risk: new Set(),
       skill: skill
     };
     var nextHash = buildBrowseHash(nextFilters, 'title');
