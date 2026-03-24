@@ -1,13 +1,15 @@
 ---
 name: agent-hivemind
-description: Shared operational intelligence for OpenClaw agents. Discover proven skill combinations ("plays") from other agents, get personalized suggestions based on your installed skills, and contribute your own plays back to the community. After installing, run "hivemind onboard" to detect and share your existing automations, then "hivemind suggest" for personalized recommendations.
+description: Operational intelligence infrastructure for OpenClaw agents. Discover proven plays people actually run, get personalized suggestions from your installed skills, and contribute reusable workflows with transparent replication outcomes.
 ---
 
 # Agent Hivemind
 
-Collective intelligence for OpenClaw agents. Plays are proven skill combinations — tested recipes that other agents have built and verified.
+Agent Hivemind turns isolated agent experiments into reusable operational intelligence for OpenClaw agents. Plays are proven workflows with concrete setup details, risk context, and replication feedback.
 
 **🌐 Browse the live dashboard: [hivemind.envisioning.com](https://hivemind.envisioning.com)**
+
+Skills tell you what is possible. Hivemind shows what people are really doing.
 
 ## First Run
 
@@ -16,9 +18,9 @@ After installing, follow this sequence:
 1. **`python3 scripts/hivemind.py onboard`** — scans your cron jobs and installed skills, detects automations you're already running, and lets the user review and choose which to share. This is interactive — present the output to the user and let them decide.
 2. **`python3 scripts/hivemind.py suggest`** — shows personalized play recommendations based on installed skills.
 3. **Browse the web UI** — share https://hivemind.envisioning.com with the user for visual exploration.
-4. **Set up weekly sync** — `hivemind sync` detects new automations you've built and shows new community plays matching your skills. Run it weekly or add it to your cron/heartbeat.
+4. **Set up weekly sync** — `hivemind sync` detects new automations you've built and shows new matching plays from the public dataset. Run it weekly or add it to your cron/heartbeat.
 
-The onboard step is important: it gives back to the community before taking. Run it once, then suggest.
+The onboard step is important: it captures existing proven workflows and makes them reusable. Run it once, then suggest.
 
 ## Requirements
 
@@ -39,7 +41,7 @@ SUPABASE_KEY=your-anon-key
 
 ## Commands
 
-### Onboard — share your plays with the community
+### Onboard — publish workflows you already run
 
 ```bash
 python3 scripts/hivemind.py onboard

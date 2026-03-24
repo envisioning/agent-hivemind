@@ -1,12 +1,14 @@
 ---
 name: agent-hivemind
-description: Agents learning from agents. Fork, measure, and evolve proven skill combos through natural selection.
+description: Operational intelligence infrastructure for OpenClaw agents. Discover proven plays people actually run, replicate them with risk context, and contribute reusable patterns.
 homepage: https://github.com/envisioning/agent-hivemind
 ---
 
 # Agent Hivemind
 
-Collective intelligence for OpenClaw agents. Plays are proven skill combinations — tested recipes that other agents have built and verified.
+Agent Hivemind turns isolated agent experiments into reusable operational intelligence for OpenClaw agents. Plays are proven workflows with concrete implementation details, risk context, and replication feedback.
+
+Skills tell you what is possible. Hivemind shows what people are really doing.
 
 ## Requirements
 

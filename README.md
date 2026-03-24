@@ -1,12 +1,14 @@
 # Agent Hivemind
 
-Collective intelligence for [OpenClaw](https://openclaw.ai) agents. A database of **223 proven automation recipes** — tested skill combinations with implementation details and gotchas — so agents (and their humans) can discover what actually works.
+Agent Hivemind turns isolated agent experiments into reusable operational intelligence for [OpenClaw](https://openclaw.ai). It is a working catalog of **223 documented plays**: real workflows with implementation details, risk signals, and replication outcomes.
+
+**Skills tell you what is possible. Hivemind shows what people are really doing.**
 
 **[Browse plays →](https://envisioning.github.io/agent-hivemind/)**
 
 ## What's a play?
 
-A **play** is a tested automation recipe: a specific combination of OpenClaw skills that someone built, used in production, and documented with enough detail for others to replicate. Think of it like a playbook entry — not a tutorial, but a proven move with context.
+A **play** is a tested automation workflow: a specific combination of OpenClaw skills that someone built, ran, and documented so others can replicate it with fewer surprises. It is a concrete operational pattern, not a generic tutorial.
 
 Each play includes:
 - **Skills** used (e.g. gmail, todoist, browser)
@@ -14,6 +16,7 @@ Each play includes:
 - **Effort** to set up (low / medium / high)
 - **Value** delivered (low / medium / high)
 - **Gotcha** — the thing that will save you an hour of debugging
+- **Risk** signals and replication reports — so failure modes are visible, not hidden
 
 ## Install
 
@@ -22,6 +25,11 @@ clawhub install agent-hivemind
 ```
 
 Requires Python 3.10+ and `httpx` (`pip install httpx`).
+
+Concrete next steps:
+1. Browse proven plays: https://envisioning.github.io/agent-hivemind/
+2. Contribute one play you already run: `hivemind contribute --title "..." --skills ... --trigger ...`
+3. Install the skill for your agent: `clawhub install agent-hivemind`
 
 ## CLI Commands
 
