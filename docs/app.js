@@ -27,6 +27,7 @@
       trigger: new Set(),
       effort: new Set(),
       value: new Set(),
+      risk: new Set(),
       skill: ''
     },
     sort: 'title'
@@ -45,6 +46,8 @@
     riskChips: document.getElementById('riskChips'),
     skillSelect: document.getElementById('skillSelect'),
     clearFilters: document.getElementById('clearFilters'),
+    heroCount: document.getElementById('heroCount'),
+    featuredPlays: document.getElementById('featuredPlays'),
     countLabel: document.getElementById('countLabel'),
     playsGrid: document.getElementById('playsGrid'),
     browseEmpty: document.getElementById('browseEmpty'),
@@ -129,6 +132,16 @@
       }
     });
 
+    if (els.featuredPlays) {
+      els.featuredPlays.addEventListener('click', function (event) {
+        var skillBtn = event.target.closest('[data-skill]');
+        if (skillBtn) {
+          event.preventDefault();
+          goToBrowseWithSkill(skillBtn.getAttribute('data-skill'));
+        }
+      });
+    }
+
     els.backButton.addEventListener('click', function () {
       var detailRoute = parseRoute();
       var from = detailRoute.params.get('from');
@@ -166,6 +179,8 @@
 
     state.allSkills = buildAllSkills(state.plays);
     populateSkillSelect();
+    renderHeroSummary();
+    renderFeaturedPlays();
   }
 
   async function fetchPlays() {
@@ -376,6 +391,94 @@
         return renderPlayCard(play);
       })
       .join('');
+  }
+
+  function renderHeroSummary() {
+    if (!els.heroCount) {
+      return;
+    }
+
+    var playsWithReplications = state.plays.filter(function (play) {
+      return Number(play.replication_count || 0) > 0;
+    }).length;
+
+    els.heroCount.innerHTML =
+      '<strong>' +
+      state.plays.length +
+      ' documented plays</strong> across ' +
+      state.allSkills.length +
+      ' skills, with ' +
+      playsWithReplications +
+      ' already carrying replication feedback.';
+  }
+
+  function renderFeaturedPlays() {
+    if (!els.featuredPlays) {
+      return;
+    }
+
+    var featured = selectFeaturedPlays(state.plays, 3);
+
+    if (!featured.length) {
+      els.featuredPlays.innerHTML = '<p class="featured-empty">No featured plays available yet.</p>';
+      return;
+    }
+
+    els.featuredPlays.innerHTML = featured
+      .map(function (play) {
+        var detailHash = '#play/' + encodeURIComponent(play.id) + '?from=' + encodeURIComponent('#browse');
+        return (
+          '<article class="featured-play-card">' +
+          '<div class="featured-play-head">' +
+          '<h3><a href="' + detailHash + '">' + escapeHtml(play.title) + '</a></h3>' +
+          (playSourceUrl(play) ? '<a class="source-link" href="' + escapeAttribute(playSourceUrl(play)) + '" target="_blank" rel="noopener noreferrer" aria-label="Source link">↗</a>' : '') +
+          '</div>' +
+          '<p class="featured-play-desc">' + escapeHtml(play.description || '') + '</p>' +
+          '<div class="badges">' +
+          renderBadge('trigger', play.trigger) +
+          renderBadge('effort', play.effort) +
+          renderBadge('value', play.value) +
+          renderRiskBadge(play.risk_level) +
+          '</div>' +
+          '<div class="pills">' +
+          (play.skills || [])
+            .slice(0, 4)
+            .map(function (skill) {
+              return '<button class="skill-pill" data-skill="' + escapeAttribute(skill) + '">' + escapeHtml(skill) + '</button>';
+            })
+            .join('') +
+          '</div>' +
+          '</article>'
+        );
+      })
+      .join('');
+  }
+
+  function selectFeaturedPlays(plays, count) {
+    var valueRank = { high: 3, medium: 2, low: 1, '': 0 };
+    var effortRank = { low: 3, medium: 2, high: 1, '': 0 };
+
+    return plays
+      .slice()
+      .sort(function (a, b) {
+        var aScore =
+          (valueRank[normalizeLevel(a.value)] || 0) * 100 +
+          (effortRank[normalizeLevel(a.effort)] || 0) * 20 +
+          Math.min(30, Number(a.replication_count || 0) * 5) +
+          (playSourceUrl(a) ? 8 : 0) +
+          Math.min(8, (a.skills || []).length * 2);
+        var bScore =
+          (valueRank[normalizeLevel(b.value)] || 0) * 100 +
+          (effortRank[normalizeLevel(b.effort)] || 0) * 20 +
+          Math.min(30, Number(b.replication_count || 0) * 5) +
+          (playSourceUrl(b) ? 8 : 0) +
+          Math.min(8, (b.skills || []).length * 2);
+
+        if (bScore !== aScore) return bScore - aScore;
+        if ((b.skills || []).length !== (a.skills || []).length) return (b.skills || []).length - (a.skills || []).length;
+        return a.title.localeCompare(b.title);
+      })
+      .slice(0, count);
   }
 
   async function renderPlayDetail(playId, params) {

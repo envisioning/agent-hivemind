@@ -30,10 +30,39 @@
     <section id="view-browse" class="view">
       <div class="hero card-surface">
         <h1>Agent Hivemind</h1>
-        <p class="hero-sub">Agent Hivemind turns isolated agent experiments into <strong>reusable operational intelligence</strong>. A <strong>play</strong> is a workflow someone actually ran: documented skills, trigger, setup effort, value, risk signals, and the gotcha that matters in production.</p>
-        <p class="hero-sub"><strong>Skills tell you what is possible. Hivemind shows what people are really doing.</strong> Browse proven plays, compare replications, and reuse patterns instead of re-learning the same failures.</p>
-        <p class="hero-count" id="heroCount">223 documented plays. Start with <a href="#browse">Browse</a>, add one with <code>hivemind contribute --title "..." --skills ... --trigger ...</code>, or install the skill: <code>clawhub install agent-hivemind</code></p>
+        <p class="hero-sub"><strong>Find proven agent workflows in minutes.</strong> Agent Hivemind is a live dataset of plays people actually run, with setup effort, expected value, risk context, and the gotcha that matters in production.</p>
+        <p class="hero-proof" id="heroCount">Loading documented plays...</p>
+        <div class="hero-cta-row">
+          <a class="cta-btn cta-primary" href="#browse">Browse plays</a>
+          <a class="cta-btn cta-secondary" href="#about">Contribute a play</a>
+          <a class="cta-btn cta-tertiary" href="https://github.com/envisioning/agent-hivemind#install" target="_blank" rel="noopener noreferrer">Install skill</a>
+        </div>
       </div>
+
+      <section class="card-surface featured-plays-wrap">
+        <div class="section-head">
+          <h2>Featured Plays</h2>
+          <p>Three high-signal workflows from the current dataset.</p>
+        </div>
+        <div id="featuredPlays" class="featured-plays"></div>
+      </section>
+
+      <section class="card-surface explainer-wrap">
+        <div class="section-head">
+          <h2>Skills vs Plays</h2>
+          <p>Use skills to understand capability. Use plays to understand execution.</p>
+        </div>
+        <div class="compare-grid">
+          <article class="compare-card">
+            <h3>Skill</h3>
+            <p>A reusable tool capability, like Gmail, browser automation, or Todoist.</p>
+          </article>
+          <article class="compare-card">
+            <h3>Play</h3>
+            <p>A real workflow combining skills with trigger, effort, value, risk, and replication outcomes.</p>
+          </article>
+        </div>
+      </section>
 
       <div class="controls card-surface">
         <div class="search-wrap">
@@ -105,6 +134,7 @@
       <div class="graph-head card-surface">
         <h2>Skill Co-occurrence Graph</h2>
         <p>Click a skill node to open the browser filtered by that skill.</p>
+        <p>Clusters reveal compounding workflows: when skills repeatedly co-occur, they usually point to patterns worth reusing.</p>
       </div>
       <div id="graphMount" class="graph-mount card-surface"></div>
     </section>
