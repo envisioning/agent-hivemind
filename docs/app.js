@@ -184,23 +184,39 @@
   }
 
   async function fetchPlays() {
-    var url = new URL('/rest/v1/plays', state.config.supabase_url);
-    url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,source,risk_level,risk_confidence,risk_flags,risk_summary,risk_signals,replication_count,created_at');
-    url.searchParams.set('order', 'title');
+    var allRows = [];
+    var pageSize = 1000;
+    var offset = 0;
 
-    var response = await fetch(url.toString(), {
-      headers: {
-        apikey: state.config.supabase_anon_key,
-        Authorization: 'Bearer ' + state.config.supabase_anon_key
+    while (true) {
+      var url = new URL('/rest/v1/plays', state.config.supabase_url);
+      url.searchParams.set('select', 'id,title,description,skills,trigger,effort,value,gotcha,source,risk_level,risk_confidence,risk_flags,risk_summary,risk_signals,replication_count,created_at');
+      url.searchParams.set('order', 'title');
+      url.searchParams.set('limit', String(pageSize));
+      url.searchParams.set('offset', String(offset));
+
+      var response = await fetch(url.toString(), {
+        headers: {
+          apikey: state.config.supabase_anon_key,
+          Authorization: 'Bearer ' + state.config.supabase_anon_key
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Supabase plays request failed with status ' + response.status);
       }
-    });
 
-    if (!response.ok) {
-      throw new Error('Supabase plays request failed with status ' + response.status);
+      var rows = await response.json();
+      allRows = allRows.concat(rows);
+
+      if (!Array.isArray(rows) || rows.length < pageSize) {
+        break;
+      }
+
+      offset += pageSize;
     }
 
-    var rows = await response.json();
-    return rows.map(normalizePlay);
+    return allRows.map(normalizePlay);
   }
 
   async function fetchCommentsCount() {
