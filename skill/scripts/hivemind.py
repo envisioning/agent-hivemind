@@ -389,6 +389,21 @@ def parse_yes_no(value: str) -> bool:
     raise argparse.ArgumentTypeError("Use yes or no")
 
 
+def emit_json(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def emit_success(args: argparse.Namespace, payload: dict[str, Any]) -> bool:
+    if getattr(args, "json", False):
+        emit_json({"ok": True, **payload})
+        return True
+    return False
+
+
+def emit_error_json(code: str, message: str) -> None:
+    emit_json({"ok": False, "error": {"code": code, "message": message}})
+
+
 def generate_embedding(text: str) -> list[float] | None:
     """Generate 384-dim embedding locally if sentence-transformers is available.
     Returns None if unavailable — the server generates embeddings automatically
@@ -1392,14 +1407,27 @@ async def cmd_contribute(ctx: AppContext, args: argparse.Namespace) -> None:
     }
     async with httpx.AsyncClient(timeout=20.0) as client:
         result = await api_post_function(client, ctx, "submit-play", play)
+
+    if emit_success(
+        args,
+        {
+            "play_id": result.get("id"),
+            "created": True,
+            "play": result,
+        },
+    ):
+        return
+
     print(f"Play created: {result['title']} (id: {result['id'][:8]}...)")
     print(f"Skills: {', '.join(result['skills'])}")
 
 
 async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
+    mode = "top"
     async with httpx.AsyncClient(timeout=20.0) as client:
         if args.skills:
             skill_list = [s.strip() for s in args.skills.split(",")]
+            mode = "skills"
             plays = await api_get_rest(
                 client,
                 ctx,
@@ -1412,6 +1440,7 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                 },
             )
         elif args.query:
+            mode = "semantic"
             embedding = generate_embedding(args.query)
             if embedding:
                 vec_str = "[" + ",".join(str(round(x, 8)) for x in embedding) + "]"
@@ -1425,6 +1454,7 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                     },
                 )
             else:
+                mode = "keyword"
                 plays = await api_get_rest(
                     client,
                     ctx,
@@ -1448,6 +1478,19 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                 },
             )
 
+    plays = plays or []
+    if emit_success(
+        args,
+        {
+            "query": args.query,
+            "skills_filter": [s.strip() for s in args.skills.split(",")] if args.skills else [],
+            "mode": mode,
+            "count": len(plays),
+            "results": plays,
+        },
+    ):
+        return
+
     if not plays:
         print("No plays found.")
         return
@@ -1463,17 +1506,21 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
 
 
 async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
-    if not ONBOARD_FLAG_PATH.exists():
-        print(ONBOARD_TIP)
-        print()
-
     my_skills = list_installed_skills()
     if not my_skills:
+        if emit_success(
+            args,
+            {
+                "installed_skills": [],
+                "count": 0,
+                "ready": [],
+                "needs_install": [],
+                "tip": "Install some skills first.",
+            },
+        ):
+            return
         print("No skills detected. Install some skills first!")
         return
-
-    print(f"Your skills: {', '.join(my_skills)}")
-    print()
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         result = await api_post_rpc(
@@ -1486,12 +1533,32 @@ async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
             },
         )
 
+    result = result or []
+    ready = [p for p in result if not p.get("missing_skills") or len(p["missing_skills"]) == 0]
+    needs_install = [p for p in result if p.get("missing_skills") and len(p["missing_skills"]) > 0]
+
+    if emit_success(
+        args,
+        {
+            "installed_skills": my_skills,
+            "count": len(result),
+            "ready": ready,
+            "needs_install": needs_install,
+            "onboard_tip": None if ONBOARD_FLAG_PATH.exists() else ONBOARD_TIP,
+        },
+    ):
+        return
+
+    if not ONBOARD_FLAG_PATH.exists():
+        print(ONBOARD_TIP)
+        print()
+
+    print(f"Your skills: {', '.join(my_skills)}")
+    print()
+
     if not result:
         print("No plays match your installed skills yet.")
         return
-
-    ready = [p for p in result if not p.get("missing_skills") or len(p["missing_skills"]) == 0]
-    needs_install = [p for p in result if p.get("missing_skills") and len(p["missing_skills"]) > 0]
 
     if ready:
         print(f"Ready to try ({len(ready)}):\n")
@@ -1513,7 +1580,7 @@ async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
 
 async def cmd_replicate(ctx: AppContext, args: argparse.Namespace) -> None:
     async with httpx.AsyncClient(timeout=20.0) as client:
-        await api_post_function(
+        result = await api_post_function(
             client,
             ctx,
             "submit-play",
@@ -1524,7 +1591,61 @@ async def cmd_replicate(ctx: AppContext, args: argparse.Namespace) -> None:
                 "notes": args.notes,
             },
         )
+
+    if emit_success(
+        args,
+        {
+            "play_id": args.play_id,
+            "outcome": args.outcome,
+            "notes": args.notes,
+            "result": result,
+        },
+    ):
+        return
+
     print(f"Replication recorded: {args.outcome}")
+
+
+async def cmd_get(ctx: AppContext, args: argparse.Namespace) -> None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        rows = await api_get_rest(
+            client,
+            ctx,
+            "plays",
+            {
+                "id": f"eq.{args.play_id}",
+                "select": "id,title,description,skills,trigger,effort,value,gotcha,replication_count,created_at,agent_hash",
+                "limit": "1",
+            },
+        )
+
+    play = rows[0] if rows else None
+    if emit_success(
+        args,
+        {
+            "play_id": args.play_id,
+            "play": play,
+        },
+    ):
+        return
+
+    if not play:
+        print(f"Play not found: {args.play_id}")
+        return
+
+    reps = play.get("replication_count") or 0
+    print(play.get("title", "Untitled"))
+    print(f"ID: {play.get('id')}")
+    print(f"Skills: {', '.join(play.get('skills', []))}")
+    print(
+        f"Trigger: {play.get('trigger', '?')} | Effort: {play.get('effort', '?')} | "
+        f"Value: {play.get('value', '?')} | Replications: {reps}"
+    )
+    print()
+    print(play.get("description", ""))
+    if play.get("gotcha"):
+        print()
+        print(f"Gotcha: {play['gotcha']}")
 
 
 async def cmd_skills_with(ctx: AppContext, args: argparse.Namespace) -> None:
@@ -1579,14 +1700,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--value", choices=["low", "medium", "high"])
     p.add_argument("--gotcha", help="The one thing that surprised you")
     p.add_argument("--os", help="Operating system (auto-detected if omitted)")
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p = sub.add_parser("search", help="Search plays")
     p.add_argument("query", nargs="?", default="")
     p.add_argument("--skills", help="Filter by skills (comma-separated)")
     p.add_argument("--limit", type=int, default=10)
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p = sub.add_parser("suggest", help="Get personalized suggestions")
     p.add_argument("--limit", type=int, default=10)
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p = sub.add_parser("onboard", help="Detect and share your existing automations")
     p.add_argument("--force", action="store_true", help="Run even if already onboarded")
@@ -1602,6 +1726,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("play_id")
     p.add_argument("--outcome", required=True, choices=["success", "partial", "failed"])
     p.add_argument("--notes", help="What was different in your setup")
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p = sub.add_parser("get", help="Fetch a play by id")
+    p.add_argument("play_id")
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p = sub.add_parser("skills-with", help="Skills commonly used with a given skill")
     p.add_argument("skill")
@@ -1633,19 +1762,29 @@ async def run() -> int:
         "onboard": cmd_onboard,
         "sync": cmd_sync,
         "replicate": cmd_replicate,
+        "get": cmd_get,
         "skills-with": cmd_skills_with,
     }
 
     try:
         await commands[args.command](ctx, args)
     except ApiError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            emit_error_json("API_ERROR", str(exc))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
         return 1
     except RuntimeError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            emit_error_json("RUNTIME_ERROR", str(exc))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
         return 1
     except httpx.RequestError as exc:
-        print(f"Network error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            emit_error_json("NETWORK_ERROR", str(exc))
+        else:
+            print(f"Network error: {exc}", file=sys.stderr)
         return 1
     return 0
 

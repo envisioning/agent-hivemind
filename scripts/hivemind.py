@@ -8,25 +8,38 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
-# Supabase anon key is public (read-only scope, RLS-protected). Hardcoded to avoid
-# runtime config fetches that scanners flag as a remote-control vector.
-SUPABASE_URL = "https://tjcryyjrjxbcjzybzdow.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqY3J5eWpyanhiY2p6eWJ6ZG93Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NTIzNjUsImV4cCI6MjA4OTUyODM2NX0.G_PtxkbqXO6jz1mGUX7-afO1WlHl1c_z0_QBNbqLeJU"
-
 CONFIG_FILE = Path.home() / ".openclaw" / "hivemind-config.env"
-SCRIPT_DIR = Path(__file__).resolve().parent
-KEY_PATH = SCRIPT_DIR / ".hivemind-key.pem"
+CONFIG_CACHE = Path.home() / ".openclaw" / "hivemind-config-cache.json"
+KEY_PATH = Path.home() / ".openclaw" / "hivemind-key.pem"
+ONBOARD_FLAG_PATH = Path.home() / ".openclaw" / "hivemind-onboard-done"
+SYNC_STATE_PATH = Path.home() / ".openclaw" / "hivemind-sync-state.json"
+CONFIG_ENDPOINT = "https://tjcryyjrjxbcjzybzdow.supabase.co/functions/v1/hivemind-config"
+
+ONBOARD_INTRO = """Agent Hivemind — Onboarding
+
+This will scan your OpenClaw cron jobs and installed skills to detect
+automations you're already running. You can review each one and choose
+to share it with the hivemind community.
+
+What gets shared: title, description, skills used, trigger type, effort/value estimate.
+What stays private: your workspace files, memory, credentials, config, personal data.
+Your identity: an anonymous hash (not reversible to you).
+
+Continue? [Y/n] """
+
+ONBOARD_TIP = "Tip: run 'hivemind onboard' to share your plays with the community."
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -49,17 +62,48 @@ def load_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _fetch_remote_config() -> tuple[str, str] | None:
+    """Fetch config from remote endpoint, cache locally for 24h."""
+    import time
+
+    # Check cache first
+    if CONFIG_CACHE.exists():
+        try:
+            cache = json.loads(CONFIG_CACHE.read_text(encoding="utf-8"))
+            if time.time() - cache.get("fetched_at", 0) < 86400:  # 24h
+                return cache["supabase_url"], cache["supabase_anon_key"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Fetch from remote
+    try:
+        from urllib.request import Request, urlopen
+
+        req = Request(CONFIG_ENDPOINT, headers={"Accept": "application/json"})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            url = data["supabase_url"]
+            key = data["supabase_anon_key"]
+            # Cache it
+            CONFIG_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            CONFIG_CACHE.write_text(
+                json.dumps({"supabase_url": url, "supabase_anon_key": key, "fetched_at": time.time()}),
+                encoding="utf-8",
+            )
+            return url, key
+    except Exception:
+        return None
+
+
 def get_config() -> tuple[str, str]:
-    """Return (supabase_url, supabase_key). Uses hardcoded defaults; env vars or
-    config file override for self-hosted instances."""
     file_values = load_env_file(CONFIG_FILE)
 
+    # Priority: env vars > config file > remote endpoint (cached)
     supabase_url = (
         os.environ.get("SUPABASE_URL")
         or file_values.get("SUPABASE_URL")
         or os.environ.get("HIVEMIND_URL")
         or file_values.get("HIVEMIND_URL")
-        or SUPABASE_URL
     )
     supabase_key = (
         os.environ.get("SUPABASE_KEY")
@@ -68,9 +112,22 @@ def get_config() -> tuple[str, str]:
         or file_values.get("SUPABASE_ANON_KEY")
         or os.environ.get("HIVEMIND_ANON_KEY")
         or file_values.get("HIVEMIND_ANON_KEY")
-        or SUPABASE_ANON_KEY
     )
 
+    # If either is missing, try remote config
+    if not supabase_url or not supabase_key:
+        remote = _fetch_remote_config()
+        if remote:
+            supabase_url = supabase_url or remote[0]
+            supabase_key = supabase_key or remote[1]
+
+    if not supabase_url or not supabase_key:
+        print(
+            "Error: missing Supabase config. Set SUPABASE_URL and SUPABASE_KEY "
+            "(env or ~/.openclaw/hivemind-config.env), or check your network connection.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     return supabase_url.rstrip("/"), supabase_key
 
 
@@ -87,18 +144,10 @@ def get_agent_hash() -> str:
         status = json.loads(result.stdout)
         raw = f"{status.get('agentId', '')}:{status.get('hostId', '')}"
     except Exception:
-        # Generate a random anonymous hash instead of using hostname+username.
-        # This means the agent won't have a persistent identity across sessions
-        # without openclaw, but avoids sending any personally-identifying info.
-        import secrets
+        import getpass
+        import socket
 
-        print(
-            "Warning: openclaw CLI not found or failed. "
-            "Using a random agent hash (identity won't persist across sessions). "
-            "Install openclaw for a stable anonymous identity.",
-            file=sys.stderr,
-        )
-        raw = secrets.token_hex(32)
+        raw = f"{socket.gethostname()}:{getpass.getuser()}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -219,6 +268,24 @@ class ApiError(RuntimeError):
     pass
 
 
+@dataclass
+class DetectedPlay:
+    title: str
+    description: str
+    skills: list[str]
+    trigger: str
+    effort: str
+    value: str
+    schedule: str | None = None
+
+
+@dataclass
+class OnboardScanResult:
+    cron_jobs: list[dict[str, Any]]
+    installed_skills: list[str]
+    cron_failed: bool
+
+
 async def api_post_function(
     client: httpx.AsyncClient,
     ctx: AppContext,
@@ -322,39 +389,30 @@ def parse_yes_no(value: str) -> bool:
     raise argparse.ArgumentTypeError("Use yes or no")
 
 
-def parse_skills_csv(raw: str) -> list[str]:
-    return [s.strip() for s in raw.split(",") if s.strip()]
+def emit_json(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False))
 
 
-def trigger_weight(trigger: str | None) -> int:
-    if not trigger:
-        return 0
-    if trigger == "cron":
-        return 2
-    if trigger in {"reactive", "event"}:
-        return 1
-    return 0
+def emit_success(args: argparse.Namespace, payload: dict[str, Any]) -> bool:
+    if getattr(args, "json", False):
+        emit_json({"ok": True, **payload})
+        return True
+    return False
 
 
-def complexity_score(play: dict[str, Any]) -> int:
-    skills = play.get("skills") or []
-    return len(skills) + trigger_weight(play.get("trigger"))
+def emit_error_json(code: str, message: str) -> None:
+    emit_json({"ok": False, "error": {"code": code, "message": message}})
 
 
 def generate_embedding(text: str) -> list[float] | None:
-    """Generate 384-dim embedding locally using sentence-transformers."""
+    """Generate 384-dim embedding locally if sentence-transformers is available.
+    Returns None if unavailable — the server generates embeddings automatically
+    using Supabase's built-in gte-small model."""
     try:
         from sentence_transformers import SentenceTransformer
-
         model = SentenceTransformer("all-MiniLM-L6-v2")
-        embedding = model.encode(text).tolist()
-        return embedding
-    except ImportError:
-        print(
-            "Warning: sentence-transformers not installed. Submitting without embedding.",
-            file=sys.stderr,
-        )
-        print("Install: pip install sentence-transformers", file=sys.stderr)
+        return model.encode(text).tolist()
+    except Exception:
         return None
 
 
@@ -368,6 +426,762 @@ def list_installed_skills() -> list[str]:
         for d in os.listdir(skills_dir)
         if os.path.isfile(os.path.join(skills_dir, d, "SKILL.md")) and not d.startswith("_")
     ]
+
+
+def command_exists(name: str) -> bool:
+    return subprocess.run(["which", name], capture_output=True, text=True).returncode == 0
+
+
+def run_local_command(cmd: list[str], timeout: int = 20) -> tuple[bool, str, str]:
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
+    except Exception as exc:
+        return False, "", str(exc)
+
+
+def sanitize_generic_text(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    # Remove paths, emails, IPs, and collapse whitespace.
+    text = re.sub(r"(?:[A-Za-z]:\\|~?/|/)[^\s,;]+", "", text)
+    text = re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", "", text)
+    text = re.sub(r"\b[^@\s]+@[^@\s]+\.[^@\s]+\b", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:120]
+
+
+def parse_skills_from_text(text: str, installed_skills: list[str]) -> set[str]:
+    lowered = text.lower()
+    return {skill for skill in installed_skills if skill.lower() in lowered}
+
+
+def parse_clawhub_list(stdout: str) -> list[str]:
+    skills: list[str] = []
+    seen: set[str] = set()
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if set(line) <= {"-", "=", "|"}:
+            continue
+        lowered = line.lower()
+        if lowered.startswith("installed") or lowered.startswith("available"):
+            continue
+        # Accept common skill slug characters.
+        m = re.match(r"^[-*]?\s*([a-z0-9][a-z0-9._-]{1,63})\b", lowered)
+        if not m:
+            continue
+        skill = m.group(1)
+        if skill in {"name", "skill", "skills", "id"}:
+            continue
+        if skill not in seen:
+            seen.add(skill)
+            skills.append(skill)
+    return skills
+
+
+def _extract_jobs_from_cron_json(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("jobs", "crons", "items", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _extract_schedule(job: dict[str, Any]) -> str | None:
+    for key in ("schedule", "cron", "expression", "spec"):
+        value = job.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    trigger = job.get("trigger")
+    if isinstance(trigger, dict):
+        for key in ("schedule", "cron", "expression"):
+            value = trigger.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _extract_name(job: dict[str, Any]) -> str:
+    for key in ("name", "title", "id", "job"):
+        value = job.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "Cron automation"
+
+
+def _extract_skills_from_obj(value: Any, installed_skills: list[str], out: set[str]) -> None:
+    if isinstance(value, str):
+        out.update(parse_skills_from_text(value, installed_skills))
+        return
+    if isinstance(value, list):
+        for item in value:
+            _extract_skills_from_obj(item, installed_skills, out)
+        return
+    if not isinstance(value, dict):
+        return
+    for key, inner in value.items():
+        lowered = str(key).lower()
+        if lowered in {"skill", "skills", "tool", "tools", "target_skill", "target_skills"}:
+            if isinstance(inner, str):
+                out.update(parse_skills_from_text(inner, installed_skills))
+            elif isinstance(inner, list):
+                for item in inner:
+                    if isinstance(item, str):
+                        out.update(parse_skills_from_text(item, installed_skills))
+        _extract_skills_from_obj(inner, installed_skills, out)
+
+
+def _normalize_title_from_job_name(job_name: str) -> str:
+    cleaned = sanitize_generic_text(job_name)
+    words = re.findall(r"[A-Za-z0-9]+", cleaned)
+    if not words:
+        return "Cron automation"
+    # Keep generic short title.
+    title = " ".join(words[:6]).strip()
+    return title.capitalize() if title else "Cron automation"
+
+
+KNOWN_PATTERNS: list[dict[str, Any]] = [
+    {
+        "required": {"weather", "calendar"},
+        "title": "Morning daily brief",
+        "description": (
+            "Automated morning summary combining weather and calendar events."
+        ),
+    },
+    {
+        "required": {"weather", "calendar", "todoist"},
+        "title": "Morning daily brief",
+        "description": (
+            "Automated morning summary combining weather, calendar events, and todo items."
+        ),
+    },
+    {
+        "required": {"gmail", "todoist"},
+        "title": "Email to tasks sync",
+        "description": (
+            "Automates extracting action items from email and creating tasks."
+        ),
+    },
+    {
+        "required": {"github", "calendar"},
+        "title": "Daily engineering standup",
+        "description": (
+            "Generates a daily standup summary from code activity and scheduled meetings."
+        ),
+    },
+]
+
+
+def detect_play_patterns(scan: OnboardScanResult) -> list[DetectedPlay]:
+    detected: list[DetectedPlay] = []
+    installed_set = set(scan.installed_skills)
+    seen_keys: set[tuple[str, str, tuple[str, ...], str | None]] = set()
+
+    for job in scan.cron_jobs:
+        name = _extract_name(job)
+        schedule = _extract_schedule(job)
+        job_skills: set[str] = set()
+        _extract_skills_from_obj(job, scan.installed_skills, job_skills)
+        job_skills.update(parse_skills_from_text(name, scan.installed_skills))
+        if not job_skills:
+            text_blob = json.dumps(job, ensure_ascii=True)
+            job_skills.update(parse_skills_from_text(text_blob, scan.installed_skills))
+
+        title = _normalize_title_from_job_name(name)
+        description = f"Automated '{title}' workflow."
+        if schedule:
+            description += f" Runs on cron schedule ({schedule})."
+
+        best_pattern: dict[str, Any] | None = None
+        for pattern in KNOWN_PATTERNS:
+            required = pattern["required"]
+            if required.issubset(job_skills):
+                if best_pattern is None or len(required) > len(best_pattern["required"]):
+                    best_pattern = pattern
+
+        if best_pattern:
+            title = best_pattern["title"]
+            description = best_pattern["description"]
+            if schedule:
+                description += f" Triggered by cron ({schedule})."
+
+        ordered_skills = sorted(job_skills)
+        key = (title.lower(), "cron", tuple(ordered_skills), schedule)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        detected.append(
+            DetectedPlay(
+                title=title,
+                description=sanitize_generic_text(description),
+                skills=ordered_skills,
+                trigger="cron",
+                effort="low",
+                value="medium",
+                schedule=schedule,
+            )
+        )
+
+    if scan.cron_failed or not scan.cron_jobs:
+        for pattern in KNOWN_PATTERNS:
+            required = pattern["required"]
+            if required.issubset(installed_set):
+                ordered_skills = sorted(required)
+                key = (pattern["title"].lower(), "manual", tuple(ordered_skills), None)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                detected.append(
+                    DetectedPlay(
+                        title=pattern["title"],
+                        description=pattern["description"],
+                        skills=ordered_skills,
+                        trigger="manual",
+                        effort="medium",
+                        value="medium",
+                        schedule=None,
+                    )
+                )
+    return detected
+
+
+def scan_openclaw_for_onboarding() -> OnboardScanResult:
+    installed_skills: list[str] = []
+    cron_jobs: list[dict[str, Any]] = []
+    cron_failed = False
+
+    if command_exists("clawhub"):
+        ok, stdout, _stderr = run_local_command(["clawhub", "list"])
+        if ok and stdout:
+            installed_skills = parse_clawhub_list(stdout)
+    if not installed_skills:
+        installed_skills = list_installed_skills()
+
+    if command_exists("openclaw"):
+        ok, stdout, stderr = run_local_command(["openclaw", "cron", "list", "--json"])
+        if ok and stdout:
+            try:
+                payload = json.loads(stdout)
+                cron_jobs = _extract_jobs_from_cron_json(payload)
+            except json.JSONDecodeError:
+                cron_failed = True
+                print("Warning: openclaw cron list --json returned invalid JSON; using skills-only matching.")
+        else:
+            cron_failed = True
+            if stderr:
+                print(f"Warning: openclaw cron list failed; using skills-only matching. ({stderr})")
+            else:
+                print("Warning: openclaw cron list failed; using skills-only matching.")
+    else:
+        cron_failed = True
+        print("Warning: openclaw CLI not found; using skills-only matching.")
+
+    return OnboardScanResult(
+        cron_jobs=cron_jobs,
+        installed_skills=sorted(set(installed_skills)),
+        cron_failed=cron_failed,
+    )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_iso(ts: datetime | None = None) -> str:
+    value = ts or _utc_now()
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _cron_job_key(job: dict[str, Any]) -> str:
+    for key in ("id", "job_id", "uuid"):
+        value = job.get(key)
+        if isinstance(value, str) and value.strip():
+            return f"id:{value.strip()}"
+    name = _extract_name(job)
+    schedule = _extract_schedule(job) or ""
+    return f"name:{name.lower()}|schedule:{schedule}"
+
+
+def load_sync_state(path: Path = SYNC_STATE_PATH) -> dict[str, Any]:
+    default: dict[str, Any] = {
+        "last_sync": None,
+        "known_cron_jobs": [],
+        "reported_plays": [],
+    }
+    if not path.exists():
+        return default
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return default
+    if not isinstance(raw, dict):
+        return default
+    state = dict(default)
+    state["last_sync"] = raw.get("last_sync")
+    state["known_cron_jobs"] = [str(v) for v in raw.get("known_cron_jobs", []) if isinstance(v, str)]
+    state["reported_plays"] = [str(v) for v in raw.get("reported_plays", []) if isinstance(v, str)]
+    return state
+
+
+def save_sync_state(state: dict[str, Any], path: Path = SYNC_STATE_PATH) -> None:
+    payload = {
+        "last_sync": state.get("last_sync"),
+        "known_cron_jobs": sorted(set(str(v) for v in state.get("known_cron_jobs", []) if str(v).strip())),
+        "reported_plays": sorted(set(str(v) for v in state.get("reported_plays", []) if str(v).strip())),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+async def fetch_new_community_plays(
+    client: httpx.AsyncClient,
+    ctx: AppContext,
+    last_sync_iso: str,
+    installed_skills: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    rows = await api_get_rest(
+        client,
+        ctx,
+        "plays",
+        {
+            "created_at": f"gte.{last_sync_iso}",
+            "order": "created_at.desc",
+            "select": "id,title,skills,effort,value,agent_hash,created_at",
+            "limit": "200",
+        },
+    )
+    installed_set = set(installed_skills)
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("agent_hash") == ctx.agent_hash:
+            continue
+        skills = [s for s in row.get("skills", []) if isinstance(s, str)]
+        if not skills:
+            continue
+        overlap = installed_set.intersection(skills)
+        if not overlap:
+            continue
+        row["skills"] = skills
+        filtered.append(row)
+
+    ready: list[dict[str, Any]] = []
+    need_one: list[dict[str, Any]] = []
+    for row in filtered:
+        skills = row["skills"]
+        missing = sorted(set(skills) - installed_set)
+        if not missing:
+            ready.append(row)
+        elif len(missing) == 1:
+            row["missing_skills"] = missing
+            need_one.append(row)
+    return ready[:5], need_one[:5], len(filtered)
+
+
+async def suggest_replications(
+    client: httpx.AsyncClient,
+    ctx: AppContext,
+    installed_skills: list[str],
+    reported_plays: list[str],
+) -> list[dict[str, Any]]:
+    if not installed_skills:
+        return []
+    rows = await api_get_rest(
+        client,
+        ctx,
+        "plays",
+        {
+            "skills": f"ov.{{{','.join(installed_skills)}}}",
+            "replication_count": "eq.0",
+            "order": "created_at.asc",
+            "select": "id,title,skills,created_at,agent_hash",
+            "limit": "60",
+        },
+    )
+    installed_set = set(installed_skills)
+    reported_set = set(reported_plays)
+    suggestions: list[dict[str, Any]] = []
+    for row in rows:
+        play_id = str(row.get("id", ""))
+        if not play_id or play_id in reported_set:
+            continue
+        if row.get("agent_hash") == ctx.agent_hash:
+            continue
+        skills = [s for s in row.get("skills", []) if isinstance(s, str)]
+        if not skills:
+            continue
+        if not set(skills).issubset(installed_set):
+            continue
+        row["skills"] = skills
+        suggestions.append(row)
+        if len(suggestions) >= 3:
+            break
+    return suggestions
+
+
+def should_continue_prompt() -> bool:
+    answer = input(ONBOARD_INTRO).strip()
+    return answer == "" or answer.lower() in {"y", "yes"}
+
+
+def prompt_detected_play_action(play: DetectedPlay) -> str:
+    print(f'Detected play: "{play.title}"')
+    print(f"Skills: {', '.join(play.skills) if play.skills else '<none detected>'}")
+    if play.trigger == "cron":
+        trigger_line = f"cron ({play.schedule})" if play.schedule else "cron"
+    else:
+        trigger_line = play.trigger
+    print(f"Trigger: {trigger_line}")
+    print()
+    print(f"Draft description: {play.description}")
+    print()
+    while True:
+        action = input("[S]hare  [E]dit description  [s]kip  [q]uit ").strip()
+        if action in {"S", "E", "s", "q"}:
+            return action
+        if action.lower() in {"share", "edit", "skip", "quit"}:
+            return {"share": "S", "edit": "E", "skip": "s", "quit": "q"}[action.lower()]
+        print("Invalid choice. Choose S, E, s, or q.")
+
+
+def prompt_sync_share_action() -> str:
+    while True:
+        action = input("     [S]hare  [E]dit  [s]kip\n> ").strip()
+        if action in {"S", "E", "s"}:
+            return action
+        if action.lower() in {"share", "edit", "skip"}:
+            return {"share": "S", "edit": "E", "skip": "s"}[action.lower()]
+        print("Invalid choice. Choose S, E, or s.")
+
+
+def prompt_replication_action() -> str:
+    while True:
+        action = input("Report it as working? [Y/n/s]kip ").strip()
+        if action == "" or action.lower() in {"y", "yes"}:
+            return "y"
+        if action.lower() in {"n", "no"}:
+            return "n"
+        if action.lower() in {"s", "skip"}:
+            return "s"
+        print("Invalid choice. Choose Y, n, or s.")
+
+
+async def submit_detected_play(
+    client: httpx.AsyncClient,
+    ctx: AppContext,
+    play: DetectedPlay,
+    source: str = "onboard",
+) -> dict[str, Any]:
+    payload = {
+        "action": "submit-play",
+        "title": play.title,
+        "description": play.description,
+        "skills": play.skills,
+        "trigger": play.trigger,
+        "effort": play.effort,
+        "value": play.value,
+        "source": source,
+        "os": sys.platform,
+    }
+    return await api_post_function(client, ctx, "submit-play", payload)
+
+
+def mark_onboard_done(path: Path = ONBOARD_FLAG_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+
+
+async def cmd_onboard(ctx: AppContext, args: argparse.Namespace) -> None:
+    explicit_run = getattr(args, "explicit_onboard", False)
+    if ONBOARD_FLAG_PATH.exists() and not args.force and not explicit_run:
+        print("Onboarding already completed. Use --force to run again.")
+        return
+
+    if not should_continue_prompt():
+        print("Cancelled.")
+        return
+
+    scan = scan_openclaw_for_onboarding()
+    if not scan.cron_jobs and not scan.installed_skills:
+        print("Nothing detected.")
+        mark_onboard_done()
+        return
+
+    plays = detect_play_patterns(scan)
+    if not plays:
+        print("Nothing detected.")
+        mark_onboard_done()
+        return
+
+    shared = 0
+    skipped = 0
+    failed = 0
+    quit_early = False
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for play in plays:
+            action = prompt_detected_play_action(play)
+            if action == "q":
+                quit_early = True
+                break
+            if action == "s":
+                skipped += 1
+                print()
+                continue
+            if action == "E":
+                edited = input("New description: ").strip()
+                if edited:
+                    play.description = sanitize_generic_text(edited)
+                if not play.description:
+                    play.description = "Automated workflow shared from onboarding."
+
+            if args.dry_run:
+                shared += 1
+                print(f"Dry run: would share '{play.title}'.")
+                print()
+                continue
+
+            try:
+                result = await submit_detected_play(client, ctx, play)
+                shared += 1
+                print(f"Shared: {result.get('title', play.title)} ({str(result.get('id', ''))[:8]})")
+            except ApiError as exc:
+                failed += 1
+                print(f"Submit failed for '{play.title}': {exc}")
+            except httpx.RequestError as exc:
+                failed += 1
+                print(f"Submit failed for '{play.title}': {exc}")
+            print()
+
+    mark_onboard_done()
+    mode = "dry-run" if args.dry_run else "live"
+    tail = " (stopped early)" if quit_early else ""
+    print(
+        f"Onboarding complete ({mode}){tail}. "
+        f"Detected: {len(plays)} | Shared: {shared} | Skipped: {skipped} | Failed: {failed}"
+    )
+
+
+async def cmd_sync(ctx: AppContext, args: argparse.Namespace) -> None:
+    state = load_sync_state()
+    now = _utc_now()
+    last_sync_dt = _parse_utc_iso(state.get("last_sync"))
+    first_sync = last_sync_dt is None
+    if last_sync_dt is None:
+        last_sync_dt = now - timedelta(days=7)
+
+    if not args.force and (now - last_sync_dt) < timedelta(days=7):
+        next_sync = last_sync_dt + timedelta(days=7)
+        print(
+            "Last sync was recent ({last}). Next recommended sync: {next}. "
+            "Use --force to run now.".format(
+                last=last_sync_dt.strftime("%Y-%m-%d %H:%M UTC"),
+                next=next_sync.strftime("%Y-%m-%d %H:%M UTC"),
+            )
+        )
+        return
+
+    print("Agent Hivemind \u2014 Weekly Sync")
+    print()
+    print("\U0001f4e4 Sharing: checking for new automations since last sync...")
+    print()
+
+    scan = scan_openclaw_for_onboarding()
+    known_jobs = set(state.get("known_cron_jobs", []))
+    current_job_keys = [_cron_job_key(job) for job in scan.cron_jobs]
+    new_jobs = [job for job in scan.cron_jobs if _cron_job_key(job) not in known_jobs]
+    new_plays = detect_play_patterns(
+        OnboardScanResult(
+            cron_jobs=new_jobs,
+            installed_skills=scan.installed_skills,
+            cron_failed=scan.cron_failed,
+        )
+    )
+
+    if not new_plays:
+        print("Found 0 new automations.")
+    else:
+        print(f"Found {len(new_plays)} new automations:")
+        print()
+        for i, play in enumerate(new_plays, 1):
+            print(f'  {i}. "{play.title}"')
+            print(f"     Skills: {', '.join(play.skills) if play.skills else '<none detected>'}")
+            trigger_line = f"cron ({play.schedule})" if play.schedule else play.trigger
+            print(f"     Trigger: {trigger_line}")
+            print(f"     Draft: {play.description}")
+            if not args.quiet:
+                print()
+
+    shared = 0
+    share_failed = 0
+    share_skipped = 0
+    reported_now: set[str] = set(state.get("reported_plays", []))
+    replication_submitted = 0
+    replication_skipped = 0
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        if new_plays and not args.quiet:
+            print()
+            for play in new_plays:
+                action = prompt_sync_share_action()
+                if action == "s":
+                    share_skipped += 1
+                    print()
+                    continue
+                if action == "E":
+                    edited = input("New description: ").strip()
+                    if edited:
+                        play.description = sanitize_generic_text(edited)
+                    if not play.description:
+                        play.description = "Automated workflow shared from weekly sync."
+                if args.dry_run:
+                    shared += 1
+                    print(f"Dry run: would share '{play.title}'.")
+                    print()
+                    continue
+                try:
+                    await submit_detected_play(client, ctx, play, source="sync")
+                    shared += 1
+                    print(f"Shared: {play.title}")
+                except (ApiError, httpx.RequestError) as exc:
+                    share_failed += 1
+                    print(f"Share failed for '{play.title}': {exc}")
+                print()
+        elif new_plays:
+            share_skipped += len(new_plays)
+            print("Quiet mode: skipped interactive sharing prompts.")
+            print()
+
+        last_sync_iso = _utc_iso(last_sync_dt)
+        ready, need_one, community_count = await fetch_new_community_plays(
+            client,
+            ctx,
+            last_sync_iso,
+            scan.installed_skills,
+        )
+        print(f"\U0001f4e5 New from the community ({community_count} plays added since last sync):")
+        print()
+        if ready:
+            print("  Ready to try (you have all skills):")
+            for row in ready:
+                skills = ", ".join(row.get("skills", []))
+                print(f'    \u2022 "{row.get("title", "Untitled")}" \u2014 {skills}')
+                print(f'      Effort: {row.get("effort", "?")} | Value: {row.get("value", "?")}')
+        else:
+            print("  Ready to try (you have all skills): none")
+        print()
+        if need_one:
+            print("  Need 1 more skill:")
+            for row in need_one:
+                skills = ", ".join(row.get("skills", []))
+                missing = ", ".join(row.get("missing_skills", []))
+                print(f'    \u2022 "{row.get("title", "Untitled")}" \u2014 {skills}')
+                print(f"      Missing: {missing}")
+        else:
+            print("  Need 1 more skill: none")
+
+        print()
+        print("\U0001f4ca Plays you might be running:")
+        suggestions = await suggest_replications(
+            client,
+            ctx,
+            scan.installed_skills,
+            state.get("reported_plays", []),
+        )
+        if not suggestions:
+            print("  No replication suggestions right now.")
+        for row in suggestions:
+            title = row.get("title", "Untitled")
+            skills = ", ".join(row.get("skills", []))
+            created_dt = _parse_utc_iso(row.get("created_at"))
+            days_old = (now - created_dt).days if created_dt else "?"
+            print(f'  "{title}" matches your skills ({skills})')
+            print(f"  and has been in the database for {days_old} days.")
+            if args.quiet:
+                continue
+            action = prompt_replication_action()
+            play_id = str(row.get("id", ""))
+            if action == "s":
+                replication_skipped += 1
+                if play_id:
+                    reported_now.add(play_id)
+                continue
+            if action == "n":
+                continue
+            if args.dry_run:
+                replication_submitted += 1
+                print(f"Dry run: would report success for '{title}'.")
+                continue
+            if play_id:
+                await api_post_function(
+                    client,
+                    ctx,
+                    "submit-play",
+                    {
+                        "action": "replicate",
+                        "play_id": play_id,
+                        "outcome": "success",
+                    },
+                )
+                replication_submitted += 1
+                reported_now.add(play_id)
+
+    if args.dry_run:
+        print()
+        print(
+            "Sync complete (dry-run). "
+            "No submissions made and sync state was not updated."
+        )
+        return
+
+    if not scan.cron_failed:
+        state["known_cron_jobs"] = current_job_keys
+    state["reported_plays"] = sorted(reported_now)
+    state["last_sync"] = _utc_iso(now)
+    save_sync_state(state)
+
+    print()
+    print(
+        "Sync complete. Shared: {shared} | Share skipped: {share_skipped} | "
+        "Share failed: {share_failed} | Replications: {repl} | Deferred: {deferred}".format(
+            shared=shared,
+            share_skipped=share_skipped,
+            share_failed=share_failed,
+            repl=replication_submitted,
+            deferred=replication_skipped,
+        )
+    )
+    print("Next sync recommended in 7 days.")
+
+    if first_sync:
+        print()
+        print("Want to run this automatically? Add to your agent's HEARTBEAT.md or cron:")
+        print('  openclaw cron add --name "Hivemind weekly sync" --schedule "0 10 * * 0" \\')
+        print(
+            '    --command "python3 ~/.openclaw/workspace/skills/agent-hivemind/scripts/hivemind.py sync --quiet"'
+        )
 
 
 def render_comments_threaded(comments: list[dict[str, Any]]) -> str:
@@ -575,7 +1389,7 @@ async def cmd_notify_prefs(ctx: AppContext, args: argparse.Namespace) -> None:
 
 
 async def cmd_contribute(ctx: AppContext, args: argparse.Namespace) -> None:
-    skills = parse_skills_csv(args.skills)
+    skills = [s.strip() for s in args.skills.split(",")]
     embed_text = f"{args.title}. {args.description}"
     embedding = generate_embedding(embed_text)
 
@@ -593,85 +1407,27 @@ async def cmd_contribute(ctx: AppContext, args: argparse.Namespace) -> None:
     }
     async with httpx.AsyncClient(timeout=20.0) as client:
         result = await api_post_function(client, ctx, "submit-play", play)
+
+    if emit_success(
+        args,
+        {
+            "play_id": result.get("id"),
+            "created": True,
+            "play": result,
+        },
+    ):
+        return
+
     print(f"Play created: {result['title']} (id: {result['id'][:8]}...)")
     print(f"Skills: {', '.join(result['skills'])}")
 
 
-async def fetch_play_metadata(
-    client: httpx.AsyncClient,
-    ctx: AppContext,
-    play_ids: list[str],
-) -> dict[str, dict[str, Any]]:
-    ids = [str(i) for i in play_ids if i]
-    if not ids:
-        return {}
-    rows = await api_get_rest(
-        client,
-        ctx,
-        "plays",
-        {
-            "id": f"in.({','.join(ids)})",
-            "select": "id,skills,trigger,parent_id,title",
-            "limit": str(max(len(ids), 1)),
-        },
-    )
-    return {str(r["id"]): r for r in rows}
-
-
-async def fetch_parent_titles(
-    client: httpx.AsyncClient,
-    ctx: AppContext,
-    plays: list[dict[str, Any]],
-) -> dict[str, str]:
-    parent_ids = sorted({str(p.get("parent_id")) for p in plays if p.get("parent_id")})
-    if not parent_ids:
-        return {}
-    parent_rows = await api_get_rest(
-        client,
-        ctx,
-        "plays",
-        {
-            "id": f"in.({','.join(parent_ids)})",
-            "select": "id,title",
-            "limit": str(max(len(parent_ids), 1)),
-        },
-    )
-    return {str(row["id"]): row.get("title", "Unknown parent") for row in parent_rows}
-
-
-def print_play(
-    index: int,
-    play: dict[str, Any],
-    parent_titles: dict[str, str],
-    indent: str = "",
-) -> None:
-    reps = play.get("replication_count") or 0
-    parent_id = play.get("parent_id")
-    fork_note = ""
-    if parent_id:
-        parent_title = parent_titles.get(str(parent_id), "Unknown parent")
-        fork_note = f" (fork of {parent_title})"
-    print(f"\n{indent}{index}. {play['title']}{fork_note}")
-    if play.get("description"):
-        print(f"{indent}   {truncate(play['description'], 120)}")
-    if play.get("skills") is not None:
-        skills_str = ", ".join(play["skills"])
-        print(f"{indent}   Skills: {skills_str}")
-    complexity = play.get("complexity")
-    if complexity is None and play.get("skills") is not None:
-        complexity = complexity_score(play)
-    print(
-        f"{indent}   Effort: {play.get('effort', '?')} | Value: {play.get('value', '?')} | "
-        f"Complexity: {complexity if complexity is not None else '?'} | Replications: {reps}"
-    )
-    if play.get("gotcha"):
-        print(f"{indent}   Gotcha: {play['gotcha']}")
-
-
 async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
+    mode = "top"
     async with httpx.AsyncClient(timeout=20.0) as client:
         if args.skills:
-            skill_list = parse_skills_csv(args.skills)
+            skill_list = [s.strip() for s in args.skills.split(",")]
+            mode = "skills"
             plays = await api_get_rest(
                 client,
                 ctx,
@@ -680,10 +1436,11 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                     "skills": f"ov.{{{','.join(skill_list)}}}",
                     "order": "replication_count.desc",
                     "limit": str(args.limit),
-                    "select": "id,title,description,skills,trigger,parent_id,effort,value,gotcha,replication_count",
+                    "select": "id,title,description,skills,effort,value,gotcha,replication_count",
                 },
             )
         elif args.query:
+            mode = "semantic"
             embedding = generate_embedding(args.query)
             if embedding:
                 vec_str = "[" + ",".join(str(round(x, 8)) for x in embedding) + "]"
@@ -697,6 +1454,7 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                     },
                 )
             else:
+                mode = "keyword"
                 plays = await api_get_rest(
                     client,
                     ctx,
@@ -705,7 +1463,7 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                         "or": f"(title.ilike.*{args.query}*,description.ilike.*{args.query}*)",
                         "order": "replication_count.desc",
                         "limit": str(args.limit),
-                        "select": "id,title,description,skills,trigger,parent_id,effort,value,gotcha,replication_count",
+                        "select": "id,title,description,skills,effort,value,gotcha,replication_count",
                     },
                 )
         else:
@@ -716,40 +1474,52 @@ async def cmd_search(ctx: AppContext, args: argparse.Namespace) -> None:
                 {
                     "order": "replication_count.desc",
                     "limit": str(args.limit),
-                    "select": "id,title,description,skills,trigger,parent_id,effort,value,gotcha,replication_count",
+                    "select": "id,title,description,skills,effort,value,gotcha,replication_count",
                 },
             )
+
+    plays = plays or []
+    if emit_success(
+        args,
+        {
+            "query": args.query,
+            "skills_filter": [s.strip() for s in args.skills.split(",")] if args.skills else [],
+            "mode": mode,
+            "count": len(plays),
+            "results": plays,
+        },
+    ):
+        return
 
     if not plays:
         print("No plays found.")
         return
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        metadata = await fetch_play_metadata(client, ctx, [str(p.get("id", "")) for p in plays])
-        for p in plays:
-            meta = metadata.get(str(p.get("id", "")), {})
-            for key in ("skills", "trigger", "parent_id", "title"):
-                if key not in p and key in meta:
-                    p[key] = meta[key]
-        parent_titles = await fetch_parent_titles(client, ctx, plays)
-
     for i, p in enumerate(plays, 1):
-        print_play(i, p, parent_titles)
+        skills_str = ", ".join(p["skills"])
+        reps = p["replication_count"] or 0
+        print(f"\n{i}. {p['title']}")
+        print(f"   Skills: {skills_str}")
+        print(f"   Effort: {p.get('effort', '?')} | Value: {p.get('value', '?')} | Replications: {reps}")
+        if p.get("gotcha"):
+            print(f"   Gotcha: {p['gotcha']}")
 
 
 async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
     my_skills = list_installed_skills()
     if not my_skills:
+        if emit_success(
+            args,
+            {
+                "installed_skills": [],
+                "count": 0,
+                "ready": [],
+                "needs_install": [],
+                "tip": "Install some skills first.",
+            },
+        ):
+            return
         print("No skills detected. Install some skills first!")
-        return
-
-    print(f"Your skills: {', '.join(my_skills)}")
-    print()
-
-    if getattr(args, "dry_run", False):
-        print("[dry-run] Would query the hivemind backend for plays matching these skills.")
-        print("[dry-run] No data submitted. Agent hash:", ctx.agent_hash)
-        print("[dry-run] Backend:", ctx.supabase_url)
         return
 
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -763,67 +1533,119 @@ async def cmd_suggest(ctx: AppContext, args: argparse.Namespace) -> None:
             },
         )
 
+    result = result or []
+    ready = [p for p in result if not p.get("missing_skills") or len(p["missing_skills"]) == 0]
+    needs_install = [p for p in result if p.get("missing_skills") and len(p["missing_skills"]) > 0]
+
+    if emit_success(
+        args,
+        {
+            "installed_skills": my_skills,
+            "count": len(result),
+            "ready": ready,
+            "needs_install": needs_install,
+            "onboard_tip": None if ONBOARD_FLAG_PATH.exists() else ONBOARD_TIP,
+        },
+    ):
+        return
+
+    if not ONBOARD_FLAG_PATH.exists():
+        print(ONBOARD_TIP)
+        print()
+
+    print(f"Your skills: {', '.join(my_skills)}")
+    print()
+
     if not result:
         print("No plays match your installed skills yet.")
         return
 
-    ready = [p for p in result if not p.get("missing_skills") or len(p["missing_skills"]) == 0]
-    needs_install = [p for p in result if p.get("missing_skills") and len(p["missing_skills"]) > 0]
-
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        metadata = await fetch_play_metadata(client, ctx, [str(p.get("id", "")) for p in result])
-        for p in result:
-            meta = metadata.get(str(p.get("id", "")), {})
-            for key in ("skills", "trigger", "parent_id", "title"):
-                if key not in p and key in meta:
-                    p[key] = meta[key]
-        parent_titles = await fetch_parent_titles(client, ctx, result)
-
     if ready:
         print(f"Ready to try ({len(ready)}):\n")
         for i, p in enumerate(ready, 1):
-            print_play(i, p, parent_titles, indent="  ")
+            reps = p["replication_count"] or 0
+            print(f"  {i}. {p['title']}")
+            print(f"     {p['description'][:120]}")
+            print(f"     Effort: {p.get('effort', '?')} | Value: {p.get('value', '?')} | Replications: {reps}")
+            if p.get("gotcha"):
+                print(f"     Gotcha: {p['gotcha']}")
             print()
 
     if needs_install:
         print(f"\nNeed 1+ more skill ({len(needs_install)}):\n")
         for p in needs_install[:5]:
             missing = ", ".join(p["missing_skills"])
-            parent_id = p.get("parent_id")
-            fork_note = ""
-            if parent_id:
-                parent_title = parent_titles.get(str(parent_id), "Unknown parent")
-                fork_note = f" (fork of {parent_title})"
-            complexity = p.get("complexity")
-            if complexity is None and p.get("skills") is not None:
-                complexity = complexity_score(p)
-            print(
-                f"  - {p['title']}{fork_note} (install: {missing}) "
-                f"[Complexity: {complexity if complexity is not None else '?'}]"
-            )
+            print(f"  - {p['title']} (install: {missing})")
 
 
 async def cmd_replicate(ctx: AppContext, args: argparse.Namespace) -> None:
-    metrics: dict[str, int] = {}
-    if args.human_interventions is not None:
-        metrics["human_interventions"] = args.human_interventions
-    if args.error_count is not None:
-        metrics["error_count"] = args.error_count
-    if args.setup_minutes is not None:
-        metrics["setup_minutes"] = args.setup_minutes
-
-    payload: dict[str, Any] = {
-        "action": "replicate",
-        "play_id": args.play_id,
-        "outcome": args.outcome,
-        "notes": args.notes,
-    }
-    if metrics:
-        payload["metrics"] = metrics
-
     async with httpx.AsyncClient(timeout=20.0) as client:
-        await api_post_function(client, ctx, "submit-play", payload)
+        result = await api_post_function(
+            client,
+            ctx,
+            "submit-play",
+            {
+                "action": "replicate",
+                "play_id": args.play_id,
+                "outcome": args.outcome,
+                "notes": args.notes,
+            },
+        )
+
+    if emit_success(
+        args,
+        {
+            "play_id": args.play_id,
+            "outcome": args.outcome,
+            "notes": args.notes,
+            "result": result,
+        },
+    ):
+        return
+
     print(f"Replication recorded: {args.outcome}")
+
+
+async def cmd_get(ctx: AppContext, args: argparse.Namespace) -> None:
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        rows = await api_get_rest(
+            client,
+            ctx,
+            "plays",
+            {
+                "id": f"eq.{args.play_id}",
+                "select": "id,title,description,skills,trigger,effort,value,gotcha,replication_count,created_at,agent_hash",
+                "limit": "1",
+            },
+        )
+
+    play = rows[0] if rows else None
+    if emit_success(
+        args,
+        {
+            "play_id": args.play_id,
+            "play": play,
+        },
+    ):
+        return
+
+    if not play:
+        print(f"Play not found: {args.play_id}")
+        return
+
+    reps = play.get("replication_count") or 0
+    print(play.get("title", "Untitled"))
+    print(f"ID: {play.get('id')}")
+    print(f"Skills: {', '.join(play.get('skills', []))}")
+    print(
+        f"Trigger: {play.get('trigger', '?')} | Effort: {play.get('effort', '?')} | "
+        f"Value: {play.get('value', '?')} | Replications: {reps}"
+    )
+    print()
+    print(play.get("description", ""))
+    if play.get("gotcha"):
+        print()
+        print(f"Gotcha: {play['gotcha']}")
 
 
 async def cmd_skills_with(ctx: AppContext, args: argparse.Namespace) -> None:
@@ -843,103 +1665,6 @@ async def cmd_skills_with(ctx: AppContext, args: argparse.Namespace) -> None:
     print(f"Skills commonly used with '{args.skill}':\n")
     for r in result:
         print(f"  {r['co_skill']}: {r['frequency']} plays")
-
-
-async def cmd_fork(ctx: AppContext, args: argparse.Namespace) -> None:
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        parent_rows = await api_get_rest(
-            client,
-            ctx,
-            "plays",
-            {
-                "id": f"eq.{args.play_id}",
-                "select": "id,title,description,skills,trigger,effort,value,gotcha",
-                "limit": "1",
-            },
-        )
-        if not parent_rows:
-            raise ApiError(f"Parent play not found: {args.play_id}")
-        parent = parent_rows[0]
-
-        title = args.title if args.title is not None else parent.get("title")
-        description = args.description if args.description is not None else parent.get("description")
-        skills = parse_skills_csv(args.skills) if args.skills else parent.get("skills") or []
-        trigger = args.trigger if args.trigger is not None else parent.get("trigger")
-        effort = args.effort if args.effort is not None else parent.get("effort")
-        value = args.value if args.value is not None else parent.get("value")
-        gotcha = args.gotcha if args.gotcha is not None else parent.get("gotcha")
-
-        embed_text = f"{title}. {description}"
-        embedding = generate_embedding(embed_text)
-
-        payload = {
-            "action": "submit-play",
-            "title": title,
-            "description": description,
-            "skills": skills,
-            "trigger": trigger,
-            "effort": effort,
-            "value": value,
-            "gotcha": gotcha,
-            "os": args.os or sys.platform,
-            "embedding": embedding,
-            "parent_id": parent["id"],
-        }
-        result = await api_post_function(client, ctx, "submit-play", payload)
-
-    print(f"Fork created: {result['title']} (id: {result['id'][:8]}...)")
-    print(f"Parent: {parent['title']} ({parent['id']})")
-    print(f"Skills: {', '.join(result.get('skills') or skills)}")
-
-
-async def cmd_lineage(ctx: AppContext, args: argparse.Namespace) -> None:
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        rows = await api_get_rest(
-            client,
-            ctx,
-            "plays",
-            {
-                "or": f"(id.eq.{args.play_id},parent_id.eq.{args.play_id})",
-                "select": "id,title,parent_id,created_at",
-                "order": "created_at.asc",
-                "limit": str(max(args.limit, 2)),
-            },
-        )
-
-        if not rows:
-            print("No lineage found.")
-            return
-
-        by_id = {str(r["id"]): r for r in rows}
-        root = by_id.get(args.play_id)
-        if root is None:
-            play_rows = await api_get_rest(
-                client,
-                ctx,
-                "plays",
-                {
-                    "id": f"eq.{args.play_id}",
-                    "select": "id,title,parent_id,created_at",
-                    "limit": "1",
-                },
-            )
-            if not play_rows:
-                print("No lineage found.")
-                return
-            root = play_rows[0]
-            rows.append(root)
-            by_id[str(root["id"])] = root
-
-    children: list[dict[str, Any]] = [r for r in rows if str(r.get("parent_id")) == str(root["id"])]
-    children.sort(key=lambda x: x.get("created_at", ""))
-
-    print(f"{root['title']} ({str(root['id'])[:8]})")
-    if not children:
-        print("└─ no forks")
-        return
-    for idx, child in enumerate(children):
-        branch = "└─" if idx == len(children) - 1 else "├─"
-        print(f"{branch} {child['title']} ({str(child['id'])[:8]})")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -975,38 +1700,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--value", choices=["low", "medium", "high"])
     p.add_argument("--gotcha", help="The one thing that surprised you")
     p.add_argument("--os", help="Operating system (auto-detected if omitted)")
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p = sub.add_parser("search", help="Search plays")
     p.add_argument("query", nargs="?", default="")
     p.add_argument("--skills", help="Filter by skills (comma-separated)")
     p.add_argument("--limit", type=int, default=10)
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p = sub.add_parser("suggest", help="Get personalized suggestions")
     p.add_argument("--limit", type=int, default=10)
-    p.add_argument("--dry-run", action="store_true", help="Preview detected skills and config without making API calls")
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    p = sub.add_parser("onboard", help="Detect and share your existing automations")
+    p.add_argument("--force", action="store_true", help="Run even if already onboarded")
+    p.add_argument("--dry-run", action="store_true", help="Show what would be shared without submitting")
+    p.set_defaults(explicit_onboard=True)
+
+    p = sub.add_parser("sync", help="Run weekly hivemind sync")
+    p.add_argument("--dry-run", action="store_true", help="Show what would happen without submitting")
+    p.add_argument("--force", action="store_true", help="Run even if last sync was recent")
+    p.add_argument("--quiet", action="store_true", help="Skip interactive prompts and print summary only")
 
     p = sub.add_parser("replicate", help="Report replication of a play")
     p.add_argument("play_id")
     p.add_argument("--outcome", required=True, choices=["success", "partial", "failed"])
     p.add_argument("--notes", help="What was different in your setup")
-    p.add_argument("--human-interventions", type=int, help="Number of manual assists needed")
-    p.add_argument("--error-count", type=int, help="Number of errors encountered")
-    p.add_argument("--setup-minutes", type=int, help="Initial setup duration in minutes")
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
-    p = sub.add_parser("fork", help="Fork an existing play, inheriting fields by default")
-    p.add_argument("play_id", help="Parent play ID")
-    p.add_argument("--title", help="Override title")
-    p.add_argument("--description", help="Override description")
-    p.add_argument("--skills", help="Override skills (comma-separated)")
-    p.add_argument("--trigger", choices=["cron", "manual", "reactive", "event"], help="Override trigger")
-    p.add_argument("--effort", choices=["low", "medium", "high"], help="Override effort")
-    p.add_argument("--value", choices=["low", "medium", "high"], help="Override value")
-    p.add_argument("--gotcha", help="Override gotcha")
-    p.add_argument("--os", help="Operating system (auto-detected if omitted)")
-
-    p = sub.add_parser("lineage", help="Show a play and its direct forks")
+    p = sub.add_parser("get", help="Fetch a play by id")
     p.add_argument("play_id")
-    p.add_argument("--limit", type=int, default=100)
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p = sub.add_parser("skills-with", help="Skills commonly used with a given skill")
     p.add_argument("skill")
@@ -1035,22 +1759,32 @@ async def run() -> int:
         "contribute": cmd_contribute,
         "search": cmd_search,
         "suggest": cmd_suggest,
+        "onboard": cmd_onboard,
+        "sync": cmd_sync,
         "replicate": cmd_replicate,
-        "fork": cmd_fork,
-        "lineage": cmd_lineage,
+        "get": cmd_get,
         "skills-with": cmd_skills_with,
     }
 
     try:
         await commands[args.command](ctx, args)
     except ApiError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            emit_error_json("API_ERROR", str(exc))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
         return 1
     except RuntimeError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            emit_error_json("RUNTIME_ERROR", str(exc))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
         return 1
     except httpx.RequestError as exc:
-        print(f"Network error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            emit_error_json("NETWORK_ERROR", str(exc))
+        else:
+            print(f"Network error: {exc}", file=sys.stderr)
         return 1
     return 0
 
