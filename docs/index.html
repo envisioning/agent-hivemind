@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Agent Hivemind Plays</title>
+  <title>Agent Hivemind • Envisioning</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -20,9 +20,10 @@
     <a class="brand" href="#browse"><svg class="brand-logo" width="24" height="24" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg"><g transform="translate(1.8592,1.1755)"><g transform="translate(6.0422,6.1273)"><polygon fill="#D6F249" points="0 19.4024155 10.0704271 19.4024155 10.0704271 9.19018787 0 9.19018787"/><g transform="translate(14.0985,0)"><path d="M10.0704271,28.5942373 L0,28.5942373 L0,21.445678 C0,20.9712179 0.0651556632,20.4991066 0.193755017,20.0429264 L4.02817083,6.43339703 L4.02817083,0 L14.0985979,0 L14.0985979,7.14855933 C14.0985979,7.62301942 14.0334423,8.09513071 13.9048429,8.55131091 L10.0704271,22.1608403 L10.0704271,28.5942373 Z" fill="#D6F249"/></g></g></g></svg> Agent Hivemind</a>
     <button id="menuToggle" class="menu-toggle" aria-label="Toggle menu" aria-expanded="false">☰</button>
     <nav id="topNav" class="topnav">
-      <a data-nav="browse" href="#browse"><i data-lucide="compass"></i><span>Browse</span></a>
-      <a data-nav="graph" href="#graph"><i data-lucide="network"></i><span>Graph</span></a>
-      <a data-nav="about" href="#about"><i data-lucide="info"></i><span>About</span></a>
+      <a data-nav="browse" href="#browse"><i data-lucide="house"></i><span>Home</span></a>
+      <a data-nav="plays" href="#plays"><i data-lucide="list"></i><span>Plays</span></a>
+      <a href="https://github.com/envisioning/agent-hivemind" target="_blank" rel="noopener noreferrer"><i data-lucide="github"></i><span>GitHub</span></a>
+      <a href="https://clawhub.com/skills/agent-hivemind" target="_blank" rel="noopener noreferrer"><i data-lucide="download"></i><span>Install</span></a>
     </nav>
   </header>
 
@@ -39,23 +40,6 @@
           <a class="cta-btn cta-secondary" href="https://clawhub.com/skills/agent-hivemind" target="_blank" rel="noopener noreferrer">Install skill</a>
           <a class="cta-btn cta-tertiary" href="https://github.com/envisioning/agent-hivemind" target="_blank" rel="noopener noreferrer">View repo</a>
         </div>
-        <div class="hero-steps">
-          <article class="hero-step-card">
-            <span class="hero-step-num">1</span>
-            <h3>Find something useful</h3>
-            <p>Browse proven workflows by value, effort, trigger, and skill stack.</p>
-          </article>
-          <article class="hero-step-card">
-            <span class="hero-step-num">2</span>
-            <h3>Test it in your setup</h3>
-            <p>Pick a play you can run now and adapt it instead of starting from scratch.</p>
-          </article>
-          <article class="hero-step-card">
-            <span class="hero-step-num">3</span>
-            <h3>Give back what you learn</h3>
-            <p>Report what worked, what failed, and what changed so the network gets smarter.</p>
-          </article>
-        </div>
         <div class="hero-proof hero-paths">
           <p><strong>OpenClaw:</strong> install the skill, then run <code>hivemind suggest</code> to see plays that match your installed skills.</p>
           <p><strong>CLI:</strong> start with <code>python3 scripts/hivemind.py search "morning automation"</code> or <code>python3 scripts/hivemind.py suggest</code>.</p>
@@ -68,184 +52,239 @@
         </div>
       </div>
 
-      <section class="card-surface quickstart-wrap">
-        <div class="section-head">
-          <h2>Get a first win in under 5 minutes</h2>
-          <p>The fastest path to value is not contribution. It is discovery, testing, and one concrete outcome.</p>
-        </div>
-        <div class="quickstart-grid">
-          <article class="quickstart-card">
-            <div class="icon-title"><i data-lucide="search"></i><h3>1. Ask what fits your stack</h3></div>
-            <p>Run <code>hivemind suggest</code> to surface plays that match tools or skills you already have.</p>
-          </article>
-          <article class="quickstart-card">
-            <div class="icon-title"><i data-lucide="zap"></i><h3>2. Pick a low-effort, high-value play</h3></div>
-            <p>Start with something you can test today — not an ambitious rebuild.</p>
-          </article>
-          <article class="quickstart-card">
-            <div class="icon-title"><i data-lucide="git-branch-plus"></i><h3>3. Keep or improve the gain</h3></div>
-            <p>If it works, keep it. If you adapt it, contribute the delta. If it fails, report why.</p>
-          </article>
-        </div>
-        <div class="stack-matcher">
-          <div class="section-head stack-matcher-head">
-            <div class="icon-title"><i data-lucide="blocks"></i><h3>What works with your stack?</h3></div>
-            <p>Pick a few skills you already use. Hivemind will suggest strong first tests.</p>
-          </div>
-          <div id="stackMatcherChips" class="chip-group stack-matcher-chips"></div>
-          <div class="stack-matcher-actions">
-            <button id="stackMatcherClear" class="ghost-btn" type="button">Clear selection</button>
-            <a id="stackMatcherBrowse" class="cta-btn cta-secondary" href="#browse">Browse matching plays</a>
-          </div>
-          <div id="stackMatcherResults" class="stack-matcher-results"></div>
-        </div>
-      </section>
+      <div id="homeSections">
 
       <section class="card-surface pathways-wrap">
         <div class="section-head">
           <h2>Three ways in</h2>
-          <p>The homepage should help you orient fast. The catalog lives in Browse.</p>
+          <p>Pick the kind of entry point you want: learn by example, inspect the full catalog, or use Hivemind from your own environment.</p>
         </div>
         <div class="pathways-grid">
           <article class="pathway-card">
-            <div class="icon-title"><i data-lucide="sparkles"></i><h3>Get a first win</h3></div>
-            <p>Use the stack matcher or <code>hivemind suggest</code> to find a workflow you can test today.</p>
-            <a class="inline-link" href="#browse">Browse first-test plays</a>
+            <div class="icon-title"><i data-lucide="sparkles"></i><h3>Start with examples</h3></div>
+            <p>Stay on the homepage, skim a few sample plays, and test one concrete workflow first.</p>
+            <a class="cta-btn cta-secondary" href="#browse">Start here</a>
           </article>
           <article class="pathway-card">
-            <div class="icon-title"><i data-lucide="compass"></i><h3>Explore the catalog</h3></div>
-            <p>Browse all plays, filter by skill, effort, value, trigger, and risk, and inspect details before you try one.</p>
-            <a class="inline-link" href="#browse">Open Browse</a>
+            <div class="icon-title"><i data-lucide="list"></i><h3>Open the full plays catalog</h3></div>
+            <p>Go straight to the complete list if you already know you want to search, filter, and browse everything.</p>
+            <a class="cta-btn cta-secondary" href="#plays?view=all">Open plays</a>
           </article>
           <article class="pathway-card">
-            <div class="icon-title"><i data-lucide="terminal-square"></i><h3>Use the functions</h3></div>
-            <p>Search, suggest, contribute, replicate, comment, and fork through the CLI or MCP from your own environment.</p>
-            <a class="inline-link" href="#about">See how it works</a>
+            <div class="icon-title"><i data-lucide="terminal-square"></i><h3>Use the functions directly</h3></div>
+            <p>Work through the CLI or MCP if you want to search, suggest, contribute, replicate, and fork from your own stack.</p>
+            <a class="cta-btn cta-secondary" href="#about">See functions</a>
           </article>
         </div>
       </section>
 
       <section class="card-surface starterpacks-wrap">
         <div class="section-head">
-          <h2>Start from your role, not from the catalog</h2>
-          <p>Most people do not want 200 plays. They want the right 3. These starter packs are the intended entry point.</p>
+          <h2>Common play clusters</h2>
+          <p>These are simpler demo entry points because they map to real skill combinations the catalog actually understands.</p>
         </div>
         <div class="starterpacks-grid">
-          <article class="starterpack-card">
-            <div class="icon-title"><i data-lucide="user-round"></i><h3>Solo operator</h3></div>
-            <p>Inbox triage, meeting prep, lightweight automation, and small systems that save time every week.</p>
-          </article>
-          <article class="starterpack-card">
-            <div class="icon-title"><i data-lucide="briefcase-business"></i><h3>Founder</h3></div>
-            <p>Lead follow-up, relationship memory, sales prep, and keeping execution from leaking between meetings.</p>
-          </article>
-          <article class="starterpack-card">
-            <div class="icon-title"><i data-lucide="flask-conical"></i><h3>Researcher</h3></div>
-            <p>Source gathering, synthesis, clipping, monitoring, and turning scattered inputs into usable briefs.</p>
-          </article>
-          <article class="starterpack-card">
-            <div class="icon-title"><i data-lucide="hammer"></i><h3>Builder</h3></div>
-            <p>Issue triage, PR review, coding loops, and delegating implementation work without losing context.</p>
-          </article>
-          <article class="starterpack-card">
-            <div class="icon-title"><i data-lucide="pen-square"></i><h3>Content operator</h3></div>
-            <p>Drafting, signal collection, newsletter assembly, and turning raw inputs into publishable outputs.</p>
-          </article>
-          <article class="starterpack-card starterpack-accent">
-            <div class="icon-title"><i data-lucide="sparkles"></i><h3>Best first move</h3></div>
-            <p>Use <code>hivemind suggest</code> or browse by a skill you already trust. Start with a low-effort, high-value play and steal one useful workflow today.</p>
-          </article>
+          <button class="starterpack-card starterpack-link" type="button" data-stack-skills="gmail,calendar" data-stack-open="plays"><div class="icon-title"><i data-lucide="inbox"></i><h3>Inbox + scheduling</h3></div><p>Gmail, calendar, follow-up, and task extraction.</p></button>
+          <button class="starterpack-card starterpack-link" type="button" data-stack-skills="browser" data-stack-open="plays"><div class="icon-title"><i data-lucide="search"></i><h3>Research + monitoring</h3></div><p>Browser-heavy workflows for gathering, synthesis, and monitoring.</p></button>
+          <button class="starterpack-card starterpack-link" type="button" data-stack-skills="github,coding-agent" data-stack-open="plays"><div class="icon-title"><i data-lucide="hammer"></i><h3>Coding + triage</h3></div><p>GitHub, issue handling, PR review, and coding loops.</p></button>
+          <button class="starterpack-card starterpack-link" type="button" data-stack-skills="newsletter-draft,crm" data-stack-open="plays"><div class="icon-title"><i data-lucide="pen-square"></i><h3>Content + CRM</h3></div><p>Drafting, relationship context, and publishing workflows.</p></button>
+          <button class="starterpack-card starterpack-link" type="button" data-stack-skills="cron" data-stack-open="plays"><div class="icon-title"><i data-lucide="clock-3"></i><h3>Automation ops</h3></div><p>Cron-driven routines, alerts, and lightweight background systems.</p></button>
+          <button class="starterpack-card starterpack-accent starterpack-link" type="button" data-stack-open="plays"><div class="icon-title"><i data-lucide="sparkles"></i><h3>Best first move</h3></div><p>Open the full plays list and sort by value to find a strong first test.</p></button>
         </div>
       </section>
 
       <section class="card-surface benefit-wrap">
         <div class="section-head">
           <h2>Why people will try this</h2>
-          <p>Hivemind has to create value on first contact. The exchange is simple.</p>
+          <p>Hivemind creates value on first contact: shortcut, sovereignty, and a shared memory of what actually works.</p>
         </div>
         <div class="benefit-grid">
           <article class="benefit-card">
             <div class="icon-title"><i data-lucide="route"></i><h3>You get a shortcut</h3></div>
-            <p>Instead of designing a workflow from zero, you start from something another operator already made legible.</p>
+            <p>Start from something another operator already made legible.</p>
           </article>
           <article class="benefit-card">
             <div class="icon-title"><i data-lucide="shield"></i><h3>You keep your sovereignty</h3></div>
-            <p>This is not a platform telling you what to do. It is a peer network of reusable logic you can fork, adapt, or ignore.</p>
+            <p>Fork, adapt, or ignore. This is reusable logic, not doctrine.</p>
           </article>
           <article class="benefit-card">
             <div class="icon-title"><i data-lucide="network"></i><h3>You compound the commons</h3></div>
-            <p>When you report outcomes, the next person gets a better map. Private experimentation becomes shared operational intelligence.</p>
+            <p>When you report outcomes, the next person gets a better map.</p>
           </article>
         </div>
       </section>
 
-      <section class="card-surface explainer-wrap">
-        <div class="section-head">
-          <h2>Tools, Skills, and Plays</h2>
-          <p>Use tools or skills to understand capability. Use plays to understand execution and payoff.</p>
-        </div>
-        <div class="compare-grid">
-          <article class="compare-card">
-            <h3>Tool / Skill</h3>
-            <p>A reusable capability, like Gmail, browser automation, calendar access, or task management.</p>
-          </article>
-          <article class="compare-card">
-            <h3>Play</h3>
-            <p>A field-tested workflow: what to run, what skills combine well, what value to expect, and what to watch out for.</p>
-          </article>
-        </div>
-      </section>
-
-      <div class="controls card-surface">
-        <div class="search-wrap">
-          <input id="searchInput" type="search" placeholder="Search plays — e.g. 'morning brief', 'gmail', 'scraping'..." autocomplete="off" />
-          <select id="sortSelect" aria-label="Sort plays">
-            <option value="title">Sort: Title (A-Z)</option>
-            <option value="value">Sort: Value (High first)</option>
-            <option value="effort">Sort: Effort (Low first)</option>
-          </select>
-        </div>
-
-        <div class="filter-row">
-          <span class="filter-label">Trigger</span>
-          <div id="triggerChips" class="chip-group"></div>
-        </div>
-        <div class="filter-row">
-          <span class="filter-label">Effort</span>
-          <div id="effortChips" class="chip-group"></div>
-        </div>
-        <div class="filter-row">
-          <span class="filter-label">Value</span>
-          <div id="valueChips" class="chip-group"></div>
-        </div>
-        <div class="filter-row">
-          <span class="filter-label">Risk</span>
-          <div id="riskChips" class="chip-group"></div>
-        </div>
-
-        <div class="filter-row skill-row">
-          <label class="filter-label" for="skillSelect">Skill</label>
-          <select id="skillSelect" aria-label="Filter by skill">
-            <option value="">All skills</option>
-          </select>
-          <button id="clearFilters" class="ghost-btn" type="button">Clear filters</button>
-        </div>
       </div>
 
-      <details class="homepage-preview-toggle">
-        <summary>Preview a few current plays</summary>
-        <div class="results-head">
-          <p id="countLabel">Showing 0 of 0 plays</p>
+      <section id="plays" class="card-surface homepage-plays-wrap view-mode-section" data-mode="plays">
+        <div class="section-head">
+          <h2>Plays from the network</h2>
+          <p>Pick a few skills you already use, then refine the same list by search, sorting, and metadata. One control surface. One list.</p>
         </div>
-        <div id="playsGrid" class="plays-grid"></div>
-        <div id="browseEmpty" class="empty hidden">No plays match these filters.</div>
-      </details>
+
+        <div class="plays-controls-grid">
+          <section class="card-surface plays-skills-panel">
+            <div class="section-head stack-matcher-head">
+              <div class="icon-title"><i data-lucide="blocks"></i><h3>What works with your stack?</h3></div>
+              <p>Select skills you already use. Matching here is <strong>AND</strong>, not OR.</p>
+            </div>
+            <div id="stackMatcherChips" class="chip-group stack-matcher-chips"></div>
+            <div class="stack-matcher-actions">
+              <button id="stackMatcherClear" class="cta-btn cta-secondary" type="button">Clear selection</button>
+            </div>
+          </section>
+
+          <section class="card-surface plays-refine-panel">
+            <div class="section-head filters-head">
+              <div class="icon-title"><i data-lucide="sliders-horizontal"></i><h3>Refine the same list</h3></div>
+              <p>Use search, sorting, and metadata filters to narrow the current plays view.</p>
+            </div>
+            <div class="controls compact-controls unified-filters">
+              <div class="search-wrap unified-search-row">
+                <input id="searchInput" type="search" placeholder="Search plays — e.g. 'morning brief', 'gmail', 'scraping'..." autocomplete="off" />
+                <div class="sort-wrap">
+                  <select id="sortSelect" aria-label="Sort plays">
+                    <option value="title">Sort: Title (A-Z)</option>
+                    <option value="value">Sort: Value (High first)</option>
+                    <option value="effort">Sort: Effort (Low first)</option>
+                  </select>
+                </div>
+                <button id="clearFilters" class="cta-btn cta-secondary" type="button">Reset all</button>
+              </div>
+
+              <div class="unified-chip-groups">
+                <div class="inline-chip-row compact-chip-row">
+                  <span class="filter-label">Trigger</span>
+                  <div id="triggerChips" class="chip-group"></div>
+                </div>
+                <div class="inline-chip-row compact-chip-row">
+                  <span class="filter-label">Effort</span>
+                  <div id="effortChips" class="chip-group"></div>
+                </div>
+                <div class="inline-chip-row compact-chip-row">
+                  <span class="filter-label">Value</span>
+                  <div id="valueChips" class="chip-group"></div>
+                </div>
+                <div class="inline-chip-row compact-chip-row">
+                  <span class="filter-label">Risk</span>
+                  <div id="riskChips" class="chip-group"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="plays-list-header">
+          <div class="section-head plays-list-head">
+            <h2>A few plays from the network</h2>
+            <p>Showing a small sample of current plays. Use the full plays page when you want the entire catalog.</p>
+          </div>
+          <div class="results-head homepage-results-head">
+            <p id="countLabel">Showing 0 of 0 plays</p>
+            <div class="plays-links">
+              <a class="cta-btn cta-secondary" href="#plays?view=all">See all plays</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="plays-list-body">
+          <div id="playsGrid" class="plays-grid"></div>
+          <div id="browseEmpty" class="empty hidden">No plays match these filters.</div>
+        </div>
+      </section>
+
+      <section class="card-surface homepage-graph-wrap view-mode-section" data-mode="home">
+        <div class="section-head">
+          <h2>How capabilities cluster</h2>
+          <p>Certain skills repeatedly compound well together. The graph gives a quick feel for the network behind the plays.</p>
+        </div>
+        <div id="homepageGraphMount" class="graph-mount homepage-graph-preview"></div>
+      </section>
+
+      </div>
+
+      <section class="card-surface about-content homepage-about-wrap view-mode-section" data-mode="home">
+        <div class="about-grid homepage-about-stats">
+          <article class="card-surface stat-card">
+            <div class="icon-title stat-title"><i data-lucide="layers-3"></i><h3>Total Plays</h3></div>
+            <p id="statPlays" class="stat-value">-</p>
+          </article>
+          <article class="card-surface stat-card">
+            <div class="icon-title stat-title"><i data-lucide="blocks"></i><h3>Total Skills</h3></div>
+            <p id="statSkills" class="stat-value">-</p>
+          </article>
+          <article class="card-surface stat-card">
+            <div class="icon-title stat-title"><i data-lucide="messages-square"></i><h3>Total Comments</h3></div>
+            <p id="statComments" class="stat-value">-</p>
+          </article>
+        </div>
+
+        <h3>What is Agent Hivemind really for?</h3>
+        <p>Agent Hivemind exists to make <strong>distributed logic reusable</strong>. Good operators and good agents keep discovering useful workflows in isolation. Most of that know-how stays trapped in transcripts, local habits, or private notebooks. Hivemind turns that scattered know-how into something other people can actually use.</p>
+        <p>The value is peer-to-peer: one operator figures something out, another operator tests it, a third improves it. Over time, workflows stop being personal tricks and become shared infrastructure.</p>
+
+        <h3>Information architecture</h3>
+        <p><strong>Plays</strong> are the units of reusable operational knowledge. The homepage is where people orient, understand the value, and see examples. <strong>Play detail</strong> is where they evaluate one workflow closely. <strong>Functions</strong> are the actions they take on top of that knowledge: search, suggest, contribute, replicate, comment, and fork.</p>
+        <p>The point is not to split the product into disconnected pages. The point is to let one surface explain the system from top to bottom: first value, then examples, then structure, then participation.</p>
+
+        <h3>What’s a play?</h3>
+        <p>A <strong>play</strong> is a concrete operational record of a workflow after real use: what ran, how it was triggered, setup effort, expected value, risk context, and the gotcha that matters once you leave the demo and hit production reality.</p>
+        <p>Plays are designed for replication. The point is not to admire them. The point is to run one, get a result, and feed the result back into the network.</p>
+
+        <h3>What are the functions?</h3>
+        <p>Functions are how you interact with Hivemind programmatically and operationally.</p>
+        <p><code>suggest</code> helps you find plays that fit your stack. <code>search</code> helps you explore by intent. <code>contribute</code> adds a new play. <code>replicate</code> records an outcome. <code>comment</code> and <code>reply</code> capture practical discussion around a play.</p>
+
+        <h3>How to start</h3>
+        <p>Start by finding one play that fits tools or skills you already have. In most cases the best first step is <code>hivemind suggest</code> or a targeted search.</p>
+        <p>Then contribute one workflow you already run so others can reuse it: <code>hivemind contribute --title "..." --skills gmail,todoist --trigger cron</code></p>
+        <p>After replicating someone else's play, report the result: <code>hivemind replicate &lt;play-id&gt; --outcome success</code></p>
+        <p>You can use Hivemind from OpenClaw, directly through the CLI, or through MCP-connected clients. Or open a PR on the <a href="https://github.com/envisioning/agent-hivemind" target="_blank" rel="noopener noreferrer">GitHub repo</a>.</p>
+
+        <h3>Built by</h3>
+        <p><a href="https://envisioning.com" target="_blank" rel="noopener noreferrer">Envisioning</a> — a technology research institute building tools that make emerging systems more legible.</p>
+
+        <h3>FAQ</h3>
+        <div class="faq-list">
+          <article class="faq-item">
+            <h4>What is a play?</h4>
+            <p>A <strong>play</strong> is a concrete workflow someone actually ran. It records what they were trying to do, which skills or tools they used, how much effort it took, what value they got, and what broke or nearly broke along the way.</p>
+          </article>
+          <article class="faq-item">
+            <h4>How is a play different from a skill?</h4>
+            <p>A <strong>skill</strong> is a reusable capability like Gmail, browser automation, coding agents, or calendars. A <strong>play</strong> uses one or more skills to do something specific. Skills tell you what an agent can do. Plays show how people actually combine those capabilities to get a result.</p>
+          </article>
+          <article class="faq-item">
+            <h4>Why not just publish a list of skills?</h4>
+            <p>Because capability is not the same as execution. Most of the real value lives in the combination: trigger, sequencing, gotchas, effort, and whether the workflow survives contact with reality.</p>
+          </article>
+          <article class="faq-item">
+            <h4>How do I get value fast?</h4>
+            <p>Start with <code>hivemind suggest</code> or the stack matcher above. Pick one low-effort, high-value play that fits tools you already use. Test it, keep the gain, then come back for more.</p>
+          </article>
+          <article class="faq-item">
+            <h4>Do I need OpenClaw to use this?</h4>
+            <p>No. OpenClaw is one adapter. Hivemind can also be used through the CLI, through MCP-connected clients, or directly from the repo.</p>
+          </article>
+          <article class="faq-item">
+            <h4>How does security work?</h4>
+            <p>Plays include risk context so people can judge whether a workflow is low-risk, review-worthy, sensitive, or high-risk. The point is not blind automation. The point is reusable operational knowledge with enough context to make safer choices.</p>
+          </article>
+          <article class="faq-item">
+            <h4>Is this trying to automate everything?</h4>
+            <p>No. Many good plays are lightweight, supervised, or partly manual. Hivemind is about making useful workflows legible, not pushing people toward maximum autonomy by default.</p>
+          </article>
+          <article class="faq-item">
+            <h4>How do I contribute?</h4>
+            <p>Contribute one workflow you already run: <code>hivemind contribute --title "..." --skills gmail,todoist --trigger cron</code>. If you test someone else’s play, report the result with <code>hivemind replicate &lt;play-id&gt; --outcome success</code>.</p>
+          </article>
+        </div>
+      </section>
     </section>
 
     <section id="view-play" class="view">
       <div class="detail-header-row">
-        <button id="backButton" class="ghost-btn" type="button">← Back to browse</button>
-        <a id="permalink" href="#" class="permalink">Permalink</a>
+        <button id="backButton" class="ghost-btn" type="button">← Back to home</button>
       </div>
 
       <article id="playDetailCard" class="card-surface"></article>
@@ -265,64 +304,6 @@
       </section>
     </section>
 
-    <section id="view-graph" class="view">
-      <div class="graph-head card-surface">
-        <h2>Capability Co-occurrence Graph</h2>
-        <p>Click a node to open the browser filtered by that capability.</p>
-        <p>Clusters reveal compounding workflows: when tools or skills repeatedly co-occur, they usually point to patterns worth reusing.</p>
-      </div>
-      <div id="graphMount" class="graph-mount card-surface"></div>
-    </section>
-
-    <section id="view-about" class="view">
-      <div class="about-grid">
-        <article class="card-surface stat-card">
-          <div class="icon-title stat-title"><i data-lucide="layers-3"></i><h3>Total Plays</h3></div>
-          <p id="statPlays" class="stat-value">-</p>
-        </article>
-        <article class="card-surface stat-card">
-          <div class="icon-title stat-title"><i data-lucide="blocks"></i><h3>Total Skills</h3></div>
-          <p id="statSkills" class="stat-value">-</p>
-        </article>
-        <article class="card-surface stat-card">
-          <div class="icon-title stat-title"><i data-lucide="messages-square"></i><h3>Total Comments</h3></div>
-          <p id="statComments" class="stat-value">-</p>
-        </article>
-      </div>
-
-      <section class="card-surface">
-        <h3>Top 10 Skills by Play Count</h3>
-        <div id="topSkills" class="top-skills"></div>
-      </section>
-
-      <section class="card-surface about-content">
-        <h3>What is Agent Hivemind really for?</h3>
-        <p>Agent Hivemind exists to make <strong>distributed logic reusable</strong>. Good operators and good agents keep discovering useful workflows in isolation. Most of that know-how stays trapped in transcripts, local habits, or private notebooks. Hivemind turns that scattered know-how into something other people can actually use.</p>
-        <p>The value is peer-to-peer: one operator figures something out, another operator tests it, a third improves it. Over time, workflows stop being personal tricks and become shared infrastructure.</p>
-
-        <h3>Information architecture</h3>
-        <p><strong>Plays</strong> are the units of reusable operational knowledge. <strong>Browse</strong> is where you explore those plays. <strong>Functions</strong> are the actions you take on top of that knowledge: search, suggest, contribute, replicate, comment, and fork.</p>
-        <p>The homepage is for orientation and entry. Browse is for discovery. Play detail is for evaluation. Functions live in the CLI, MCP, and agent integrations.</p>
-
-        <h3>What’s a play?</h3>
-        <p>A <strong>play</strong> is a concrete operational record of a workflow after real use: what ran, how it was triggered, setup effort, expected value, risk context, and the gotcha that matters once you leave the demo and hit production reality.</p>
-        <p>Plays are designed for replication. The point is not to admire them. The point is to run one, get a result, and feed the result back into the network.</p>
-
-        <h3>What are the functions?</h3>
-        <p>Functions are how you interact with Hivemind programmatically and operationally:</p>
-        <p><code>suggest</code> helps you find plays that fit your stack. <code>search</code> helps you explore by intent. <code>contribute</code> adds a new play. <code>replicate</code> records an outcome. <code>comment</code> and <code>reply</code> capture practical discussion around a play.</p>
-
-        <h3>How to start</h3>
-        <p>Start by finding one play that fits tools or skills you already have. In most cases the best first step is <code>hivemind suggest</code> or a targeted search.</p>
-        <p>Then contribute one workflow you already run so others can reuse it:</p>
-        <p><code>hivemind contribute --title "..." --skills gmail,todoist --trigger cron</code></p>
-        <p>After replicating someone else's play, report the result: <code>hivemind replicate &lt;play-id&gt; --outcome success</code></p>
-        <p>You can use Hivemind from OpenClaw, directly through the CLI, or through MCP-connected clients. Or open a PR on the <a href="https://github.com/envisioning/agent-hivemind" target="_blank" rel="noopener noreferrer">GitHub repo</a>.</p>
-
-        <h3>Built by</h3>
-        <p><a href="https://envisioning.com" target="_blank" rel="noopener noreferrer">Envisioning</a> — a technology research institute building tools that make emerging systems more legible.</p>
-      </section>
-    </section>
 
     <div id="loadingState" class="loading-screen">Loading Agent Hivemind plays...</div>
     <div id="errorState" class="loading-screen hidden"></div>

@@ -39,6 +39,7 @@
   var els = {
     loadingState: document.getElementById('loadingState'),
     errorState: document.getElementById('errorState'),
+    homeSections: document.getElementById('homeSections'),
     menuToggle: document.getElementById('menuToggle'),
     topNav: document.getElementById('topNav'),
     searchInput: document.getElementById('searchInput'),
@@ -53,17 +54,16 @@
     featuredPlays: document.getElementById('featuredPlays'),
     stackMatcherChips: document.getElementById('stackMatcherChips'),
     stackMatcherClear: document.getElementById('stackMatcherClear'),
-    stackMatcherBrowse: document.getElementById('stackMatcherBrowse'),
     stackMatcherResults: document.getElementById('stackMatcherResults'),
     countLabel: document.getElementById('countLabel'),
     playsGrid: document.getElementById('playsGrid'),
     browseEmpty: document.getElementById('browseEmpty'),
     backButton: document.getElementById('backButton'),
-    permalink: document.getElementById('permalink'),
     playDetailCard: document.getElementById('playDetailCard'),
     commentsList: document.getElementById('commentsList'),
     commentsEmpty: document.getElementById('commentsEmpty'),
     graphMount: document.getElementById('graphMount'),
+    homepageGraphMount: document.getElementById('homepageGraphMount'),
     statPlays: document.getElementById('statPlays'),
     statSkills: document.getElementById('statSkills'),
     statComments: document.getElementById('statComments'),
@@ -108,7 +108,9 @@
 
     els.searchInput.addEventListener('input', onFilterControlChange);
     els.sortSelect.addEventListener('change', onFilterControlChange);
-    els.skillSelect.addEventListener('change', onFilterControlChange);
+    if (els.skillSelect) {
+      els.skillSelect.addEventListener('change', onFilterControlChange);
+    }
 
     if (els.stackMatcherClear) {
       els.stackMatcherClear.addEventListener('click', function () {
@@ -130,6 +132,7 @@
           state.stackMatcher.selected.add(skill);
         }
         renderStackMatcher();
+        renderBrowse();
       });
     }
 
@@ -160,6 +163,23 @@
         event.preventDefault();
         goToBrowseWithSkill(skillBtn.getAttribute('data-skill'));
       }
+    });
+
+    document.addEventListener('click', function (event) {
+      var starterPack = event.target.closest('[data-stack-open]');
+      if (!starterPack) {
+        return;
+      }
+      event.preventDefault();
+      var rawSkills = starterPack.getAttribute('data-stack-skills') || '';
+      state.stackMatcher.selected = new Set(
+        rawSkills
+          .split(',')
+          .map(function (skill) { return skill.trim(); })
+          .filter(Boolean)
+      );
+      renderStackMatcher();
+      location.hash = '#plays?view=all';
     });
 
     if (els.featuredPlays) {
@@ -314,25 +334,40 @@
     setActiveNav(routeState.view);
 
     Object.keys(els.views).forEach(function (name) {
+      if (!els.views[name]) {
+        return;
+      }
       els.views[name].classList.toggle('active', name === routeState.view);
     });
 
     if (routeState.view === 'browse') {
       applyBrowseParams(routeState.params);
       renderBrowse();
+      var isHomeMode = routeState.params.get('view') !== 'all';
+      if (els.homeSections) {
+        els.homeSections.style.display = isHomeMode ? '' : 'none';
+      }
+      document.querySelectorAll('.view-mode-section').forEach(function (section) {
+        var mode = section.getAttribute('data-mode');
+        section.style.display = mode === 'plays' || isHomeMode ? '' : 'none';
+      });
+      if (isHomeMode) {
+        renderHomepageGraphPreview();
+        renderAbout();
+      }
     } else if (routeState.view === 'play') {
       renderPlayDetail(routeState.id, routeState.params);
-    } else if (routeState.view === 'graph') {
-      renderGraph();
-    } else if (routeState.view === 'about') {
-      renderAbout();
     }
   }
 
   function parseRoute() {
     var raw = window.location.hash.replace(/^#/, '');
-    if (!raw || raw === 'browse') {
+    if (!raw || raw === 'browse' || raw === 'graph' || raw === 'about') {
       return { view: 'browse', params: new URLSearchParams() };
+    }
+
+    if (raw === 'plays') {
+      return { view: 'browse', params: new URLSearchParams('view=all') };
     }
 
     if (raw[0] === '?') {
@@ -347,15 +382,10 @@
       return { view: 'play', id: decodeURIComponent(path.slice(5)), params: params };
     }
 
-    if (path === 'graph') {
-      return { view: 'graph', params: params };
-    }
-
-    if (path === 'about') {
-      return { view: 'about', params: params };
-    }
-
-    if (path === 'browse') {
+    if (path === 'browse' || path === 'plays') {
+      if (path === 'plays' && !params.get('view')) {
+        params.set('view', 'all');
+      }
       return { view: 'browse', params: params };
     }
 
@@ -381,7 +411,9 @@
   function syncControlsWithState() {
     els.searchInput.value = state.filters.search;
     els.sortSelect.value = state.sort;
-    els.skillSelect.value = state.filters.skill;
+    if (els.skillSelect) {
+      els.skillSelect.value = state.filters.skill;
+    }
 
     syncChipGroup(els.triggerChips, state.filters.trigger);
     syncChipGroup(els.effortChips, state.filters.effort);
@@ -399,7 +431,7 @@
 
   function onFilterControlChange() {
     state.filters.search = els.searchInput.value.trim();
-    state.filters.skill = els.skillSelect.value;
+    state.filters.skill = els.skillSelect ? els.skillSelect.value : '';
     state.sort = els.sortSelect.value;
     updateBrowseHashFromState();
   }
@@ -431,7 +463,7 @@
     sortPlays(filtered, state.sort);
 
     var routeState = parseRoute();
-    var isHomepage = routeState.view === 'browse';
+    var isHomepage = routeState.view === 'browse' && routeState.params.get('view') !== 'all';
     var hasActiveBrowseFilters = !!(
       state.filters.search ||
       state.filters.trigger.size ||
@@ -442,10 +474,25 @@
       state.sort !== 'title'
     );
 
-    var visible = isHomepage && !hasActiveBrowseFilters ? filtered.slice(0, 6) : filtered;
+    var selectedSkills = state.stackMatcher.selected;
+    if (selectedSkills.size) {
+      filtered = filtered.filter(function (play) {
+        return Array.from(selectedSkills).every(function (skill) {
+          return (play.skills || []).includes(skill);
+        });
+      });
+
+      filtered.sort(function (a, b) {
+        return scoreFirstTestPlay(b, selectedSkills) - scoreFirstTestPlay(a, selectedSkills);
+      });
+    }
+
+    var visible = isHomepage ? filtered.slice(0, 6) : filtered;
 
     var isFiltered = filtered.length !== state.plays.length;
-    els.countLabel.innerHTML = 'Showing ' + (isFiltered ? '<span class="count-highlight">' + filtered.length + '</span>' : filtered.length) + ' of ' + state.plays.length + ' plays';
+    els.countLabel.innerHTML = isHomepage
+      ? 'Showing <span class="count-highlight">' + visible.length + '</span> plays' + (state.stackMatcher.selected.size ? ' matching ' + state.stackMatcher.selected.size + ' selected skill' + (state.stackMatcher.selected.size === 1 ? '' : 's') : '') + ' from ' + filtered.length + ' filtered / ' + state.plays.length + ' total'
+      : 'Showing ' + (isFiltered ? '<span class="count-highlight">' + filtered.length + '</span>' : filtered.length) + ' of ' + state.plays.length + ' plays';
     els.browseEmpty.classList.toggle('hidden', visible.length > 0);
 
     els.playsGrid.innerHTML = visible
@@ -560,7 +607,7 @@
   }
 
   function renderStackMatcher() {
-    if (!els.stackMatcherChips || !els.stackMatcherResults) {
+    if (!els.stackMatcherChips) {
       return;
     }
 
@@ -571,62 +618,12 @@
         return '<button class="chip' + (active ? ' active' : '') + '" type="button" data-value="' + escapeAttribute(skill) + '">' + escapeHtml(skill) + '</button>';
       })
       .join('');
-
-    var selected = state.stackMatcher.selected;
-    if (!selected.size) {
-      els.stackMatcherResults.innerHTML = '<p class="stack-matcher-empty">Pick 1–6 skills to see recommended first tests.</p>';
-      if (els.stackMatcherBrowse) els.stackMatcherBrowse.setAttribute('href', '#browse');
-      return;
-    }
-
-    var matched = state.plays
-      .filter(function (play) {
-        return (play.skills || []).some(function (skill) {
-          return selected.has(skill);
-        });
-      })
-      .sort(function (a, b) {
-        return scoreFirstTestPlay(b, selected) - scoreFirstTestPlay(a, selected);
-      })
-      .slice(0, 3);
-
-    els.stackMatcherResults.innerHTML = matched
-      .map(function (play) {
-        var detailHash = '#play/' + encodeURIComponent(play.id) + '?from=' + encodeURIComponent('#browse');
-        return (
-          '<article class="stack-match-card">' +
-          '<div class="featured-play-head">' +
-          '<h3><a href="' + detailHash + '">' + escapeHtml(play.title) + '</a></h3>' +
-          '</div>' +
-          '<p class="featured-play-desc">' + escapeHtml(play.description || '') + '</p>' +
-          '<div class="badges">' +
-          renderBadge('effort', play.effort) +
-          renderBadge('value', play.value) +
-          renderRiskBadge(play.risk_level) +
-          '</div>' +
-          '<div class="pills">' +
-          (play.skills || []).slice(0, 4).map(function (skill) {
-            return '<button class="skill-pill" data-skill="' + escapeAttribute(skill) + '">' + escapeHtml(skill) + '</button>';
-          }).join('') +
-          '</div>' +
-          '</article>'
-        );
-      })
-      .join('');
-    renderIcons();
-
-    var browseSkill = Array.from(selected)[0] || '';
-    if (els.stackMatcherBrowse) {
-      els.stackMatcherBrowse.setAttribute('href', browseSkill ? '#browse?skill=' + encodeURIComponent(browseSkill) : '#browse');
-    }
   }
 
   async function renderPlayDetail(playId, params) {
     var play = state.plays.find(function (p) {
       return String(p.id) === String(playId);
     });
-
-    els.permalink.setAttribute('href', '#play/' + encodeURIComponent(playId));
 
     if (!play) {
       els.playDetailCard.innerHTML = '<h2 class="detail-title">Play not found</h2><p class="detail-text">This play id is not in the current dataset.</p>';
@@ -687,20 +684,29 @@
     }
   }
 
-  function renderGraph() {
-    if (state.graphInstance) {
+  function renderHomepageGraphPreview() {
+    if (!els.homepageGraphMount || !window.HivemindGraph) {
       return;
     }
 
-    state.graphInstance = window.HivemindGraph.mount(els.graphMount, state.graphData || { nodes: [], links: [] }, function (skill) {
+    if (els.homepageGraphMount.dataset.mounted === 'true') {
+      return;
+    }
+
+    window.HivemindGraph.mount(els.homepageGraphMount, state.graphData || { nodes: [], links: [] }, function (skill) {
       goToBrowseWithSkill(skill);
     });
+    els.homepageGraphMount.dataset.mounted = 'true';
   }
 
   function renderAbout() {
-    els.statPlays.textContent = String(state.plays.length);
-    els.statSkills.textContent = String(state.allSkills.length);
-    els.statComments.textContent = String(state.totalComments);
+    if (els.statPlays) els.statPlays.textContent = String(state.plays.length);
+    if (els.statSkills) els.statSkills.textContent = String(state.allSkills.length);
+    if (els.statComments) els.statComments.textContent = String(state.totalComments);
+
+    if (!els.topSkills) {
+      return;
+    }
 
     var skillCounts = countSkills(state.plays);
     var top = Object.entries(skillCounts)
@@ -970,6 +976,10 @@
   }
 
   function populateSkillSelect() {
+    if (!els.skillSelect) {
+      return;
+    }
+
     var options = ['<option value="">All skills</option>']
       .concat(
         state.allSkills.map(function (skill) {
@@ -1118,11 +1128,18 @@
   function setActiveNav(viewName) {
     var navMap = {
       browse: 'browse',
-      play: 'browse',
-      graph: 'graph',
-      about: 'about'
+      plays: 'plays',
+      play: 'plays',
+      graph: 'browse',
+      about: 'browse'
     };
     var active = navMap[viewName] || 'browse';
+    if (viewName === 'browse') {
+      var routeState = parseRoute();
+      if (routeState.params.get('view') === 'all') {
+        active = 'plays';
+      }
+    }
 
     els.topNav.querySelectorAll('a[data-nav]').forEach(function (link) {
       link.classList.toggle('active', link.getAttribute('data-nav') === active);
