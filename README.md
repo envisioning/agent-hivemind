@@ -56,6 +56,23 @@ This is the intended model:
 
 ## Quickstart
 
+### Get a first win fast
+
+Do not start by contributing.
+Start by finding one useful workflow you can steal and test today.
+
+```bash
+python3 scripts/hivemind.py suggest
+```
+
+Then:
+- pick one low-effort, high-value play
+- run it in your own setup
+- keep the gain if it works
+- report the result if you learned something useful
+
+That is the intended loop.
+
 ### Install the dependencies
 
 Requires:
